@@ -19,6 +19,7 @@ TELEMETRY_TOPIC = "telemetry-stream"
 DATA_DIR = Path(__file__).parent / "data"
 DEVICES_FILE = DATA_DIR / "devices.json"
 TOKENS_FILE = DATA_DIR / "enrollment_tokens.json"
+WEBSITES_FILE = DATA_DIR / "websites.json"
 
 DEV_API_KEY = "dev-api-key"
 
@@ -45,6 +46,9 @@ def ensure_data_files():
 
     if not TOKENS_FILE.exists():
         TOKENS_FILE.write_text("{}", encoding="utf-8")
+    
+    if not WEBSITES_FILE.exists():
+        WEBSITES_FILE.write_text("{}", encoding="utf-8")
 
 
 def read_json(path: Path):
@@ -160,6 +164,12 @@ class DeviceRegisterRequest(BaseModel):
     platform: str
     agent_version: str = "0.1.0"
 
+class WebsiteCreateRequest(BaseModel):
+    name: str
+    url: str
+    expected_status: int = 200
+    check_interval_seconds: int = 10
+
 
 # -----------------------------
 # App lifecycle
@@ -197,6 +207,73 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.post("/api/v1/websites")
+async def create_website_monitor(payload: WebsiteCreateRequest):
+    websites = read_json(WEBSITES_FILE)
+
+    website_id = "site_" + secrets.token_urlsafe(8)
+
+    url = payload.url.strip()
+
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
+    websites[website_id] = {
+        "website_id": website_id,
+        "name": payload.name,
+        "url": url,
+        "expected_status": payload.expected_status,
+        "check_interval_seconds": payload.check_interval_seconds,
+        "status": "unknown",
+        "last_checked": None,
+        "last_status_code": None,
+        "last_latency_ms": None,
+        "last_error": None,
+        "created_at": utc_now_iso(),
+    }
+
+    write_json(WEBSITES_FILE, websites)
+
+    return {
+        "status": "created",
+        "website": websites[website_id],
+    }
+
+
+@app.get("/api/v1/websites")
+async def list_website_monitors():
+    websites = read_json(WEBSITES_FILE)
+
+    return {
+        "count": len(websites),
+        "websites": list(websites.values()),
+    }
+
+
+@app.delete("/api/v1/websites/{website_id}")
+async def delete_website_monitor(website_id: str):
+    websites = read_json(WEBSITES_FILE)
+
+    if website_id not in websites:
+        raise HTTPException(status_code=404, detail="Website monitor not found")
+
+    removed = websites.pop(website_id)
+
+    write_json(WEBSITES_FILE, websites)
+
+    return {
+        "status": "deleted",
+        "website": removed,
+    }
+
+
+
+
+
+
+
+
 
 
 # -----------------------------

@@ -12,7 +12,8 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
 METRICS_TOPIC = "telemetry-stream"
 ALERTS_TOPIC = "alerts-stream"
-TOPICS = [METRICS_TOPIC, ALERTS_TOPIC]
+WEBSITE_TOPIC = "website-monitor-stream"
+TOPICS = [METRICS_TOPIC, ALERTS_TOPIC, WEBSITE_TOPIC]
 
 WEBSOCKET_HOST = "0.0.0.0"
 WEBSOCKET_PORT = 8765
@@ -90,7 +91,15 @@ async def consume_topic(topic_name):
             print(f"📨 Message received from Kafka topic [{topic_name}]: {msg.value[:80]}")
 
             data = json.loads(msg.value.decode("utf-8"))
-            data["packet_type"] = "ALERT" if topic_name == ALERTS_TOPIC else "METRIC"
+            if topic_name == ALERTS_TOPIC:
+                data["packet_type"] = "ALERT"
+            elif topic_name == WEBSITE_TOPIC:
+                data["packet_type"] = "WEBSITE"
+            else:
+                data["packet_type"] = "METRIC"
+
+
+
             data["streamer_received_at"] = LAST_MESSAGE_AT
             data["streamer_topic"] = topic_name
 
@@ -150,9 +159,10 @@ async def main():
 
     try:
         await asyncio.gather(
-            websocket_server.wait_closed(),
-            consume_topic(METRICS_TOPIC),
-            consume_topic(ALERTS_TOPIC),
+           websocket_server.wait_closed(),
+           consume_topic(METRICS_TOPIC),
+           consume_topic(ALERTS_TOPIC),
+           consume_topic(WEBSITE_TOPIC),
         )
     finally:
         websocket_server.close()
