@@ -1,1 +1,3 @@
+aiokafka
+websockets
 aiohttp
