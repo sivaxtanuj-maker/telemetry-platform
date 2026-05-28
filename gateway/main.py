@@ -11,6 +11,7 @@ from aiokafka import AIOKafkaProducer
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from database import check_database_connection, init_database
 
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -184,6 +185,13 @@ async def lifespan(app: FastAPI):
     print("Starting gateway...")
 
     try:
+        print("Initializing Postgres database...")
+        await init_database()
+        print("Postgres tables ready.")
+    except Exception as e:
+        print(f"Postgres unavailable during startup. Continuing in JSON fallback mode. Reason: {e}")
+
+    try:
         producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
         await producer.start()
         print(f"Kafka producer connected at {KAFKA_BOOTSTRAP}")
@@ -282,10 +290,13 @@ async def delete_website_monitor(website_id: str):
 
 @app.get("/health")
 async def health():
+    db_connected = await check_database_connection()
+
     return {
         "status": "gateway-online",
         "service": "aether-gateway",
         "kafka_enabled": producer is not None,
+        "database_connected": db_connected,
         "kafka_bootstrap": KAFKA_BOOTSTRAP,
         "device_count": len(read_json(DEVICES_FILE)),
         "ingest_endpoint": "/api/v1/telemetry",

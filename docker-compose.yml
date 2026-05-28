@@ -7,6 +7,7 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: telemetry_kafka
@@ -20,3 +21,19 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  postgres:
+    image: postgres:16
+    container_name: telemetry_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aether
+      POSTGRES_PASSWORD: aether_password
+      POSTGRES_DB: aether_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - telemetry_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  telemetry_postgres_data:
