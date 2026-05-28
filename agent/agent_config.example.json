@@ -1,0 +1,7 @@
+{
+  "gateway_url": "http://localhost:8000/api/v1/telemetry",
+  "device_id": "Example-Device-Node01",
+  "organization_name": "Example Organization",
+  "api_key": "replace-with-your-device-api-key",
+  "tick_rate": 2.0
+}

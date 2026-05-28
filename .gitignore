@@ -1,0 +1,11 @@
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.local
+agent/agent_config.json
+dist/
+.vite/
+.DS_Store
