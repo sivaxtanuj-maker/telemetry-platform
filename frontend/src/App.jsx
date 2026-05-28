@@ -76,13 +76,13 @@ function KpiCard({ icon: Icon, label, value, detail, tone = "cyan" }) {
   return (
     <div
       className={cx(
-        "rounded-xl border bg-[#0d1527]/60 backdrop-blur-sm p-5 shadow-lg shadow-black/20",
+        "rounded-xl border bg-[#0d1527]/60 p-5 shadow-lg shadow-black/20 backdrop-blur-sm",
         toneMap[tone]
       )}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 font-mono">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
             {label}
           </p>
           <p className="mt-1 text-3xl font-bold tracking-tight text-white">
@@ -111,11 +111,11 @@ function Panel({ title, subtitle, icon: Icon, children, right }) {
           )}
 
           <div>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200 font-mono">
+            <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-slate-200">
               {title}
             </h2>
             {subtitle && (
-              <p className="text-[11px] text-slate-500 mt-0.5">{subtitle}</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
             )}
           </div>
         </div>
@@ -186,7 +186,7 @@ function SystemStatusPanel({ gatewayHealth, streamerHealth, healthError }) {
       right={
         <span
           className={cx(
-            "rounded-full border px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-widest",
+            "rounded-full border px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest",
             healthError
               ? "border-rose-500/20 bg-rose-500/10 text-rose-400"
               : "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
@@ -209,7 +209,7 @@ function SystemStatusPanel({ gatewayHealth, streamerHealth, healthError }) {
             className="rounded-xl border border-slate-800/70 bg-[#070b14]/60 p-4"
           >
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
                 {item.label}
               </p>
 
@@ -257,16 +257,19 @@ function AddDevicePanel({
 }) {
   const [copiedCommand, setCopiedCommand] = useState(null);
 
-  const cleanServerUrl = (enrollmentServerUrl || GATEWAY_API_BASE).replace(/\/$/, "");
-  const telemetryUrl = `${cleanServerUrl}/api/v1/telemetry`;
+  const cleanServerUrl = (enrollmentServerUrl || GATEWAY_API_BASE).replace(
+    /\/$/,
+    ""
+  );
+
   const token = enrollmentResult?.enrollment_token;
 
   const windowsCommand = token
-    ? `$env:AETHER_ENROLLMENT_TOKEN="${token}"\n$env:AETHER_GATEWAY_URL="${telemetryUrl}"\npython .\\agent.py`
+    ? `cd C:\\Users\\Tanuj\\telemetry-platform\nSet-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned\n.\\install\\install_windows_agent.ps1 -EnrollmentToken "${token}" -GatewayUrl "${cleanServerUrl}" -UseLocalSource`
     : "";
 
   const linuxCommand = token
-    ? `export AETHER_ENROLLMENT_TOKEN="${token}"\nexport AETHER_GATEWAY_URL="${telemetryUrl}"\npython3 agent.py`
+    ? `cd /mnt/c/Users/Tanuj/telemetry-platform\n./install/install_linux_agent.sh --token "${token}" --gateway-url "${cleanServerUrl}" --use-local-source`
     : "";
 
   async function copyCommand(label, value) {
@@ -282,17 +285,17 @@ function AddDevicePanel({
   return (
     <Panel
       title="Add Device"
-      subtitle="Generate an enrollment token for a new machine"
+      subtitle="Generate an enrollment token and installer command for a new machine"
       icon={Server}
       right={
-        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-cyan-400">
+        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-cyan-400">
           Enrollment
         </span>
       }
     >
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div>
-          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+          <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
             Device Name
           </label>
           <input
@@ -304,7 +307,7 @@ function AddDevicePanel({
         </div>
 
         <div>
-          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+          <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
             Organization
           </label>
           <input
@@ -316,7 +319,7 @@ function AddDevicePanel({
         </div>
 
         <div>
-          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+          <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
             Gateway Server URL
           </label>
           <input
@@ -333,7 +336,7 @@ function AddDevicePanel({
           onClick={onCreateEnrollmentToken}
           disabled={enrollmentLoading}
           className={cx(
-            "rounded-lg border px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition",
+            "rounded-lg border px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider transition",
             enrollmentLoading
               ? "border-slate-800 bg-slate-900 text-slate-500"
               : "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
@@ -356,7 +359,7 @@ function AddDevicePanel({
       {enrollmentResult && (
         <div className="mt-5 space-y-4">
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
-            <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-400">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-emerald-400">
               Enrollment Token Created
             </p>
             <p className="mt-1 break-all font-mono text-xs text-slate-300">
@@ -368,20 +371,21 @@ function AddDevicePanel({
           </div>
 
           <div className="rounded-xl border border-slate-800/60 bg-[#070b14]/50 p-4 text-[11px] text-slate-500">
-            Run the command from the folder containing <span className="font-mono text-slate-300">agent.py</span>.
-            On a real external device, copy the agent folder or later use a proper installer.
+            Run the command from the project root folder. The installer copies
+            the agent, creates a virtual environment, installs dependencies,
+            registers the device, saves config, and starts telemetry.
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
-                  Windows Command
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                  Windows Installer Command
                 </p>
 
                 <button
                   onClick={() => copyCommand("windows", windowsCommand)}
-                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-mono text-slate-400 hover:text-cyan-300"
+                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 font-mono text-[10px] text-slate-400 hover:text-cyan-300"
                 >
                   {copiedCommand === "windows" ? (
                     <Check className="h-3 w-3" />
@@ -395,19 +399,19 @@ function AddDevicePanel({
               <textarea
                 readOnly
                 value={windowsCommand}
-                className="h-32 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
+                className="h-40 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
               />
             </div>
 
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
-                  Linux / Ubuntu Command
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                  Linux / Ubuntu Installer Command
                 </p>
 
                 <button
                   onClick={() => copyCommand("linux", linuxCommand)}
-                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-mono text-slate-400 hover:text-cyan-300"
+                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 font-mono text-[10px] text-slate-400 hover:text-cyan-300"
                 >
                   {copiedCommand === "linux" ? (
                     <Check className="h-3 w-3" />
@@ -421,7 +425,7 @@ function AddDevicePanel({
               <textarea
                 readOnly
                 value={linuxCommand}
-                className="h-32 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
+                className="h-40 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
               />
             </div>
           </div>
@@ -441,9 +445,7 @@ function DeviceCard({ deviceId, node, nowMs }) {
 
   const isCritical = !isOffline && (cpu >= 85 || ram >= 90 || anomaly >= 75);
   const isWarn =
-    !isOffline &&
-    !isCritical &&
-    (cpu >= 70 || ram >= 85 || anomaly >= 50);
+    !isOffline && !isCritical && (cpu >= 70 || ram >= 85 || anomaly >= 50);
 
   return (
     <div
@@ -479,14 +481,14 @@ function DeviceCard({ deviceId, node, nowMs }) {
             </h3>
           </div>
 
-          <p className="mt-1 text-[10px] font-mono text-slate-500">
+          <p className="mt-1 font-mono text-[10px] text-slate-500">
             Last seen: {node.lastSeen}
           </p>
         </div>
 
         <span
           className={cx(
-            "rounded px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest border",
+            "rounded border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest",
             isOffline
               ? "border-slate-800 bg-slate-900 text-slate-500"
               : isCritical
@@ -541,10 +543,10 @@ function DeviceCard({ deviceId, node, nowMs }) {
         ].map(([label, value, Icon, progressColor]) => (
           <div
             key={label}
-            className="bg-[#070b14] border border-slate-900/60 rounded-lg p-2.5"
+            className="rounded-lg border border-slate-900/60 bg-[#070b14] p-2.5"
           >
-            <div className="mb-1 flex items-center justify-between text-[11px] font-mono">
-              <span className="flex items-center gap-1.5 text-slate-500 font-medium">
+            <div className="mb-1 flex items-center justify-between font-mono text-[11px]">
+              <span className="flex items-center gap-1.5 font-medium text-slate-500">
                 <Icon className="h-3 w-3" /> {label}
               </span>
 
@@ -553,7 +555,7 @@ function DeviceCard({ deviceId, node, nowMs }) {
               </span>
             </div>
 
-            <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-900">
               <div
                 className={cx(
                   "h-full rounded-full transition-all duration-500 ease-out",
@@ -630,7 +632,7 @@ export default function App() {
           setStreamerHealth(streamerData);
           setHealthError(null);
         }
-      } catch (error) {
+      } catch {
         if (!cancelled) {
           setHealthError("Unable to reach one or more health endpoints");
         }
@@ -818,7 +820,9 @@ export default function App() {
   const summary = useMemo(() => {
     const activeNodes = devices
       .map(([, node]) => node)
-      .filter((node) => nowMs - Number(node.lastUpdatedTimestamp || 0) <= NODE_TIMEOUT_MS);
+      .filter(
+        (node) => nowMs - Number(node.lastUpdatedTimestamp || 0) <= NODE_TIMEOUT_MS
+      );
 
     const avgCpu = activeNodes.length
       ? activeNodes.reduce((sum, n) => sum + clamp(n.cpu), 0) / activeNodes.length
@@ -853,13 +857,12 @@ export default function App() {
       <header className="sticky top-0 z-50 border-b border-slate-800/50 bg-[#090d16]/80 px-6 py-4 backdrop-blur-md">
         <div className="mx-auto flex max-w-[1700px] flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-white font-mono">
+            <h1 className="font-mono text-lg font-bold tracking-tight text-white">
               AETHER //{" "}
-              <span className="text-slate-400 font-sans font-normal text-sm">
+              <span className="font-sans text-sm font-normal text-slate-400">
                 Telemetry Center
               </span>
             </h1>
-
             <p className="text-[11px] text-slate-500">
               Persistent Enterprise Infrastructure Node Evaluator
             </p>
@@ -869,10 +872,9 @@ export default function App() {
             <span className="rounded-full border border-slate-800 bg-slate-900/40 px-3.5 py-1.5 font-mono text-[10px] text-cyan-400">
               LIVE STREAM: {WS_URL}
             </span>
-
             <span
               className={cx(
-                "rounded-full border px-3.5 py-1.5 text-[10px] font-mono font-bold",
+                "rounded-full border px-3.5 py-1.5 font-mono text-[10px] font-bold",
                 status === "OPERATIONAL"
                   ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
                   : status === "DEGRADED"
@@ -895,7 +897,6 @@ export default function App() {
             detail="Active cluster health matrix"
             tone="emerald"
           />
-
           <KpiCard
             icon={Gauge}
             label="Cluster Avg CPU"
@@ -903,7 +904,6 @@ export default function App() {
             detail={`Cluster memory at ${summary.avgRam.toFixed(1)}%`}
             tone="cyan"
           />
-
           <KpiCard
             icon={Zap}
             label="Ingest Throughput"
@@ -911,7 +911,6 @@ export default function App() {
             detail="Metrics processed per second"
             tone="amber"
           />
-
           <KpiCard
             icon={Bell}
             label="Active SLA Alerts"
@@ -948,7 +947,7 @@ export default function App() {
               icon={Network}
             >
               {devices.length === 0 ? (
-                <div className="py-12 text-center text-slate-500 font-mono text-xs">
+                <div className="py-12 text-center font-mono text-xs text-slate-500">
                   Awaiting ingest hooks...
                 </div>
               ) : (
@@ -978,35 +977,23 @@ export default function App() {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#131b2e" />
                     <XAxis dataKey="time" tick={{ fill: "#475569", fontSize: 10 }} />
-                    <YAxis
-                      tick={{ fill: "#475569", fontSize: 10 }}
-                      domain={[0, 100]}
+                    <YAxis tick={{ fill: "#475569", fontSize: 10 }} domain={[0, 100]} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#0d1527", borderColor: "#1e293b" }}
+                      itemStyle={{ color: "#f1f5f9" }}
                     />
-                    <Tooltip />
-                    <Area
-                      type="monotone"
-                      dataKey="cpu"
-                      name="CPU Core"
-                      stroke="#22d3ee"
-                      fill="#22d3ee"
-                      fillOpacity={0.05}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="ram"
-                      name="Memory Commit"
-                      stroke="#818cf8"
-                      fill="#818cf8"
-                      fillOpacity={0.04}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="anomaly"
-                      name="Anomaly Score"
-                      stroke="#f43f5e"
-                      fill="#f43f5e"
-                      fillOpacity={0.04}
-                    />
+                    <Area type="monotone" dataKey="cpu" stroke="#22d3ee" fill="url(#colorCpu)" fillOpacity={0.1} strokeWidth={2} name="CPU %" />
+                    <Area type="monotone" dataKey="ram" stroke="#818cf8" fill="url(#colorRam)" fillOpacity={0.05} strokeWidth={2} name="RAM %" />
+                    <defs>
+                      <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorRam" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#818cf8" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1014,37 +1001,30 @@ export default function App() {
           </div>
 
           <div className="xl:col-span-4">
-            <Panel title="SLA Breach Pipeline Feed" icon={AlertTriangle}>
-              <div className="max-h-[220px] space-y-2 overflow-y-auto custom-scrollbar">
+            <Panel title="Real-time Alert Log" icon={AlertTriangle}>
+              <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
                 {alerts.length === 0 ? (
-                  <div className="rounded-xl border border-slate-800/60 bg-[#070b14]/50 py-12 text-center">
-                    <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                      No SLA breaches detected
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-600">
-                      Alert stream is currently quiet.
-                    </p>
+                  <div className="py-12 text-center font-mono text-xs text-slate-500">
+                    No active threshold breaches.
                   </div>
                 ) : (
-                  alerts.map((alert, idx) => (
-                    <div
-                      key={`${alert.device_id}-${alert.timestamp}-${idx}`}
-                      className="rounded border border-rose-950/40 bg-[#070b14] p-3 border-l-2 border-l-rose-500 font-mono text-[11px]"
-                    >
-                      <div className="flex justify-between text-slate-500 text-[10px] mb-1">
-                        <span>{severityFromAlert(alert)}</span>
-                        <span>{formatTime(new Date(alert.timestamp))}</span>
+                  alerts.map((alert, idx) => {
+                    const severity = severityFromAlert(alert);
+                    return (
+                      <div key={idx} className="flex items-start gap-2.5 rounded-lg border border-slate-800/60 bg-[#070b14]/80 p-2.5 text-xs">
+                        <span className={cx(
+                          "rounded px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-wider",
+                          severity === "CRITICAL" ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400"
+                        )}>
+                          {severity}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-slate-200 truncate font-semibold">{alert.device_id || "Node Event"}</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">{alert.message || `Resource spike detected: CPU ${alert.cpu}%`}</p>
+                        </div>
                       </div>
-
-                      <p className="text-slate-300">
-                        Node{" "}
-                        <span className="text-white font-bold">
-                          {alert.device_id || "unknown-device"}
-                        </span>{" "}
-                        breached SLA boundary.
-                      </p>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </Panel>
