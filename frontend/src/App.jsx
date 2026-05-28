@@ -3,6 +3,8 @@ import {
   Activity,
   AlertTriangle,
   Bell,
+  Check,
+  Copy,
   Cpu,
   Gauge,
   HardDrive,
@@ -26,7 +28,8 @@ const MAX_ALERTS = 30;
 const NODE_TIMEOUT_MS = 20000;
 
 const WS_URL = "ws://localhost:8765";
-const GATEWAY_HEALTH_URL = "http://localhost:8000/health";
+const GATEWAY_API_BASE = "http://localhost:8000";
+const GATEWAY_HEALTH_URL = `${GATEWAY_API_BASE}/health`;
 const STREAMER_HEALTH_URL = "http://localhost:8766/health";
 
 function cx(...classes) {
@@ -112,9 +115,7 @@ function Panel({ title, subtitle, icon: Icon, children, right }) {
               {title}
             </h2>
             {subtitle && (
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {subtitle}
-              </p>
+              <p className="text-[11px] text-slate-500 mt-0.5">{subtitle}</p>
             )}
           </div>
         </div>
@@ -242,15 +243,207 @@ function SystemStatusPanel({ gatewayHealth, streamerHealth, healthError }) {
   );
 }
 
-function DeviceCard({ deviceId, node }) {
+function AddDevicePanel({
+  enrollmentDeviceName,
+  setEnrollmentDeviceName,
+  enrollmentOrgName,
+  setEnrollmentOrgName,
+  enrollmentServerUrl,
+  setEnrollmentServerUrl,
+  enrollmentResult,
+  enrollmentLoading,
+  enrollmentError,
+  onCreateEnrollmentToken,
+}) {
+  const [copiedCommand, setCopiedCommand] = useState(null);
+
+  const cleanServerUrl = (enrollmentServerUrl || GATEWAY_API_BASE).replace(/\/$/, "");
+  const telemetryUrl = `${cleanServerUrl}/api/v1/telemetry`;
+  const token = enrollmentResult?.enrollment_token;
+
+  const windowsCommand = token
+    ? `$env:AETHER_ENROLLMENT_TOKEN="${token}"\n$env:AETHER_GATEWAY_URL="${telemetryUrl}"\npython .\\agent.py`
+    : "";
+
+  const linuxCommand = token
+    ? `export AETHER_ENROLLMENT_TOKEN="${token}"\nexport AETHER_GATEWAY_URL="${telemetryUrl}"\npython3 agent.py`
+    : "";
+
+  async function copyCommand(label, value) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedCommand(label);
+      setTimeout(() => setCopiedCommand(null), 1500);
+    } catch {
+      setCopiedCommand(null);
+    }
+  }
+
+  return (
+    <Panel
+      title="Add Device"
+      subtitle="Generate an enrollment token for a new machine"
+      icon={Server}
+      right={
+        <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-mono font-bold uppercase tracking-widest text-cyan-400">
+          Enrollment
+        </span>
+      }
+    >
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div>
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+            Device Name
+          </label>
+          <input
+            value={enrollmentDeviceName}
+            onChange={(event) => setEnrollmentDeviceName(event.target.value)}
+            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+            placeholder="Friend-Laptop-Node01"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+            Organization
+          </label>
+          <input
+            value={enrollmentOrgName}
+            onChange={(event) => setEnrollmentOrgName(event.target.value)}
+            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+            placeholder="Local Development Tenant"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+            Gateway Server URL
+          </label>
+          <input
+            value={enrollmentServerUrl}
+            onChange={(event) => setEnrollmentServerUrl(event.target.value)}
+            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+            placeholder="http://localhost:8000"
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          onClick={onCreateEnrollmentToken}
+          disabled={enrollmentLoading}
+          className={cx(
+            "rounded-lg border px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider transition",
+            enrollmentLoading
+              ? "border-slate-800 bg-slate-900 text-slate-500"
+              : "border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
+          )}
+        >
+          {enrollmentLoading ? "Generating..." : "Generate Enrollment Token"}
+        </button>
+
+        <p className="text-[11px] text-slate-500">
+          For another computer, use your Windows LAN IP instead of localhost.
+        </p>
+      </div>
+
+      {enrollmentError && (
+        <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
+          {enrollmentError}
+        </div>
+      )}
+
+      {enrollmentResult && (
+        <div className="mt-5 space-y-4">
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
+            <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-400">
+              Enrollment Token Created
+            </p>
+            <p className="mt-1 break-all font-mono text-xs text-slate-300">
+              {enrollmentResult.enrollment_token}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Expires at: {enrollmentResult.expires_at}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800/60 bg-[#070b14]/50 p-4 text-[11px] text-slate-500">
+            Run the command from the folder containing <span className="font-mono text-slate-300">agent.py</span>.
+            On a real external device, copy the agent folder or later use a proper installer.
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+                  Windows Command
+                </p>
+
+                <button
+                  onClick={() => copyCommand("windows", windowsCommand)}
+                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-mono text-slate-400 hover:text-cyan-300"
+                >
+                  {copiedCommand === "windows" ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                  {copiedCommand === "windows" ? "Copied" : "Copy"}
+                </button>
+              </div>
+
+              <textarea
+                readOnly
+                value={windowsCommand}
+                className="h-32 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
+              />
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 font-mono">
+                  Linux / Ubuntu Command
+                </p>
+
+                <button
+                  onClick={() => copyCommand("linux", linuxCommand)}
+                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 text-[10px] font-mono text-slate-400 hover:text-cyan-300"
+                >
+                  {copiedCommand === "linux" ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                  {copiedCommand === "linux" ? "Copied" : "Copy"}
+                </button>
+              </div>
+
+              <textarea
+                readOnly
+                value={linuxCommand}
+                className="h-32 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function DeviceCard({ deviceId, node, nowMs }) {
   const cpu = clamp(node.cpu);
   const ram = clamp(node.ram);
   const anomaly = clamp(node.anomaly);
 
-  const isOffline = Date.now() - node.lastUpdatedTimestamp > NODE_TIMEOUT_MS;
+  const lastUpdated = Number(node.lastUpdatedTimestamp || 0);
+  const isOffline = nowMs - lastUpdated > NODE_TIMEOUT_MS;
 
-  const isCritical = !isOffline && (cpu >= 85 || anomaly >= 75);
-  const isWarn = !isOffline && !isCritical && (cpu >= 70 || anomaly >= 50);
+  const isCritical = !isOffline && (cpu >= 85 || ram >= 90 || anomaly >= 75);
+  const isWarn =
+    !isOffline &&
+    !isCritical &&
+    (cpu >= 70 || ram >= 85 || anomaly >= 50);
 
   return (
     <div
@@ -315,7 +508,7 @@ function DeviceCard({ deviceId, node }) {
             Cpu,
             isOffline
               ? "bg-slate-800"
-              : isCritical
+              : cpu >= 85
               ? "bg-rose-500"
               : cpu >= 70
               ? "bg-amber-400"
@@ -325,7 +518,13 @@ function DeviceCard({ deviceId, node }) {
             "MEM_COMMIT",
             ram,
             HardDrive,
-            isOffline ? "bg-slate-800" : "bg-cyan-400",
+            isOffline
+              ? "bg-slate-800"
+              : ram >= 90
+              ? "bg-rose-500"
+              : ram >= 85
+              ? "bg-amber-400"
+              : "bg-cyan-400",
           ],
           [
             "AI_ANOMALY",
@@ -335,6 +534,8 @@ function DeviceCard({ deviceId, node }) {
               ? "bg-slate-800"
               : anomaly >= 75
               ? "bg-rose-500"
+              : anomaly >= 50
+              ? "bg-amber-400"
               : "bg-indigo-400",
           ],
         ].map(([label, value, Icon, progressColor]) => (
@@ -385,6 +586,23 @@ export default function App() {
   const [gatewayHealth, setGatewayHealth] = useState(null);
   const [streamerHealth, setStreamerHealth] = useState(null);
   const [healthError, setHealthError] = useState(null);
+
+  const [enrollmentDeviceName, setEnrollmentDeviceName] =
+    useState("New-Laptop-Node01");
+  const [enrollmentOrgName, setEnrollmentOrgName] =
+    useState("Local Development Tenant");
+  const [enrollmentServerUrl, setEnrollmentServerUrl] =
+    useState(GATEWAY_API_BASE);
+  const [enrollmentResult, setEnrollmentResult] = useState(null);
+  const [enrollmentLoading, setEnrollmentLoading] = useState(false);
+  const [enrollmentError, setEnrollmentError] = useState(null);
+
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("aether_nodes", JSON.stringify(metrics));
@@ -524,7 +742,7 @@ export default function App() {
           data.event_type === "CRITICAL_SPIKE" ||
           data.severity;
 
-        if (isAlertPacket || cpu >= 85 || anomaly >= 75) {
+        if (isAlertPacket || cpu >= 85 || ram >= 90 || anomaly >= 75) {
           setAlerts((prev) => [
             {
               ...data,
@@ -558,27 +776,64 @@ export default function App() {
     return () => socket?.close();
   }, []);
 
+  async function createEnrollmentToken() {
+    setEnrollmentLoading(true);
+    setEnrollmentError(null);
+    setEnrollmentResult(null);
+
+    try {
+      const cleanServerUrl = enrollmentServerUrl.replace(/\/$/, "");
+
+      const response = await fetch(
+        `${cleanServerUrl}/api/v1/devices/enrollment-token`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            organization_name: enrollmentOrgName,
+            device_name: enrollmentDeviceName,
+            expires_in_minutes: 60,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Failed to create enrollment token");
+      }
+
+      const data = await response.json();
+      setEnrollmentResult(data);
+    } catch (error) {
+      setEnrollmentError(error.message || "Failed to create enrollment token");
+    } finally {
+      setEnrollmentLoading(false);
+    }
+  }
+
   const devices = Object.entries(metrics);
 
   const summary = useMemo(() => {
     const activeNodes = devices
       .map(([, node]) => node)
-      .filter((node) => Date.now() - node.lastUpdatedTimestamp <= NODE_TIMEOUT_MS);
+      .filter((node) => nowMs - Number(node.lastUpdatedTimestamp || 0) <= NODE_TIMEOUT_MS);
 
     const avgCpu = activeNodes.length
-      ? activeNodes.reduce((sum, n) => sum + n.cpu, 0) / activeNodes.length
+      ? activeNodes.reduce((sum, n) => sum + clamp(n.cpu), 0) / activeNodes.length
       : 0;
 
     const avgRam = activeNodes.length
-      ? activeNodes.reduce((sum, n) => sum + n.ram, 0) / activeNodes.length
+      ? activeNodes.reduce((sum, n) => sum + clamp(n.ram), 0) / activeNodes.length
       : 0;
 
     const critical = activeNodes.filter(
-      (n) => n.cpu >= 85 || n.anomaly >= 75
+      (n) => clamp(n.cpu) >= 85 || clamp(n.ram) >= 90 || clamp(n.anomaly) >= 75
     ).length;
 
     const totalThroughput = activeNodes.reduce(
-      (sum, n) => sum + n.throughput,
+      (sum, n) => sum + (Number(n.throughput) || 0),
       0
     );
 
@@ -591,7 +846,7 @@ export default function App() {
         ? Math.max(0, 100 - critical * 20 - avgCpu * 0.1)
         : 100,
     };
-  }, [devices]);
+  }, [devices, nowMs]);
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 antialiased">
@@ -672,6 +927,19 @@ export default function App() {
           healthError={healthError}
         />
 
+        <AddDevicePanel
+          enrollmentDeviceName={enrollmentDeviceName}
+          setEnrollmentDeviceName={setEnrollmentDeviceName}
+          enrollmentOrgName={enrollmentOrgName}
+          setEnrollmentOrgName={setEnrollmentOrgName}
+          enrollmentServerUrl={enrollmentServerUrl}
+          setEnrollmentServerUrl={setEnrollmentServerUrl}
+          enrollmentResult={enrollmentResult}
+          enrollmentLoading={enrollmentLoading}
+          enrollmentError={enrollmentError}
+          onCreateEnrollmentToken={createEnrollmentToken}
+        />
+
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-12">
           <div className="xl:col-span-12">
             <Panel
@@ -686,7 +954,12 @@ export default function App() {
               ) : (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {devices.map(([deviceId, node]) => (
-                    <DeviceCard key={deviceId} deviceId={deviceId} node={node} />
+                    <DeviceCard
+                      key={deviceId}
+                      deviceId={deviceId}
+                      node={node}
+                      nowMs={nowMs}
+                    />
                   ))}
                 </div>
               )}
