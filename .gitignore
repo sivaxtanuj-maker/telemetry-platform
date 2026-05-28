@@ -9,3 +9,8 @@ agent/agent_config.json
 dist/
 .vite/
 .DS_Store
+
+# Local generated AETHER files
+gateway/data/
+agent/agent_config.backup.json
+$RunScriptPath
