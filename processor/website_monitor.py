@@ -35,6 +35,7 @@ async def fetch_websites():
             """
             SELECT
                 website_id,
+                organization_id,
                 name,
                 url,
                 expected_status,
@@ -54,6 +55,8 @@ async def fetch_websites():
 
 
 async def update_website_result(result):
+    checked_at = datetime.fromisoformat(result["timestamp"])
+
     async with db_pool.acquire() as conn:
         await conn.execute(
             """
@@ -67,7 +70,7 @@ async def update_website_result(result):
             WHERE website_id = $6
             """,
             result["status"],
-            datetime.fromisoformat(result["timestamp"]),
+            checked_at,
             result["status_code"],
             result["latency_ms"],
             result["error"],
@@ -77,6 +80,7 @@ async def update_website_result(result):
         await conn.execute(
             """
             INSERT INTO website_check_results (
+                organization_id,
                 website_id,
                 name,
                 url,
@@ -87,8 +91,9 @@ async def update_website_result(result):
                 error,
                 checked_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
+            result["organization_id"],
             result["website_id"],
             result["name"],
             result["url"],
@@ -97,29 +102,31 @@ async def update_website_result(result):
             result["status_code"],
             result["latency_ms"],
             result["error"],
-            datetime.fromisoformat(result["timestamp"]),
+            checked_at,
         )
 
 
 async def check_website(client, website):
-    website_id = website["website_id"]
-    url = website["url"]
-    expected_status = int(website.get("expected_status", 200))
-
     started = time.perf_counter()
 
     try:
-        response = await client.get(url, timeout=8.0, follow_redirects=True)
-        latency_ms = round((time.perf_counter() - started) * 1000, 2)
+        response = await client.get(
+            website["url"],
+            timeout=8.0,
+            follow_redirects=True,
+        )
 
+        latency_ms = round((time.perf_counter() - started) * 1000, 2)
+        expected_status = int(website.get("expected_status", 200))
         is_up = response.status_code == expected_status
 
-        result = {
+        return {
             "packet_type": "WEBSITE",
             "event_type": "WEBSITE_CHECK",
-            "website_id": website_id,
+            "organization_id": website["organization_id"],
+            "website_id": website["website_id"],
             "name": website["name"],
-            "url": url,
+            "url": website["url"],
             "status": "up" if is_up else "degraded",
             "expected_status": expected_status,
             "status_code": response.status_code,
@@ -130,13 +137,15 @@ async def check_website(client, website):
 
     except Exception as e:
         latency_ms = round((time.perf_counter() - started) * 1000, 2)
+        expected_status = int(website.get("expected_status", 200))
 
-        result = {
+        return {
             "packet_type": "WEBSITE",
             "event_type": "WEBSITE_CHECK",
-            "website_id": website_id,
+            "organization_id": website["organization_id"],
+            "website_id": website["website_id"],
             "name": website["name"],
-            "url": url,
+            "url": website["url"],
             "status": "down",
             "expected_status": expected_status,
             "status_code": None,
@@ -144,8 +153,6 @@ async def check_website(client, website):
             "error": str(e),
             "timestamp": utc_now_iso(),
         }
-
-    return result
 
 
 async def publish_result(result):
@@ -159,9 +166,9 @@ async def monitor_loop():
     global producer
     global db_pool
 
-    print("🌐 Starting AETHER Website Monitor worker...")
-    print(f"🗄️  Reading monitors from Postgres: {DATABASE_URL}")
-    print(f"📡 Publishing results to Kafka topic: {WEBSITE_TOPIC}")
+    print("Starting AETHER Website Monitor worker...")
+    print(f"Reading monitors from Postgres: {DATABASE_URL}")
+    print(f"Publishing results to Kafka topic: {WEBSITE_TOPIC}")
 
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
     await producer.start()
@@ -177,7 +184,7 @@ async def monitor_loop():
                 now = time.time()
 
                 if not websites:
-                    print("⚠️  No website monitors configured yet.")
+                    print("No website monitors configured yet.")
                     await asyncio.sleep(5)
                     continue
 
@@ -197,7 +204,7 @@ async def monitor_loop():
                     last_checked_by_site[website_id] = now
 
                     print(
-                        f"🌐 {result['name']} -> "
+                        f"{result['name']} -> "
                         f"{result['status'].upper()} | "
                         f"status={result['status_code']} | "
                         f"latency={result['latency_ms']}ms"
@@ -207,7 +214,9 @@ async def monitor_loop():
 
     finally:
         await producer.stop()
-        await db_pool.close()
+
+        if db_pool:
+            await db_pool.close()
 
 
 if __name__ == "__main__":

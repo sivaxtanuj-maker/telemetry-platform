@@ -16,7 +16,7 @@ class Organization(Base):
     organization_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    plan: Mapped[str] = mapped_column(String(50), default="dev")
+    plan: Mapped[str] = mapped_column(String(50), default="free")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -24,6 +24,7 @@ class User(Base):
     __tablename__ = "users"
 
     user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+
     organization_id: Mapped[str] = mapped_column(
         String(255),
         ForeignKey("organizations.organization_id"),
@@ -33,8 +34,11 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    password_hash: Mapped[str] = mapped_column(Text)
+
     role: Mapped[str] = mapped_column(String(50), default="owner")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Device(Base):
@@ -46,7 +50,6 @@ class Device(Base):
         String(255),
         ForeignKey("organizations.organization_id"),
         index=True,
-        default="org_dev",
     )
 
     display_name: Mapped[str] = mapped_column(String(255))
@@ -75,7 +78,6 @@ class EnrollmentToken(Base):
         String(255),
         ForeignKey("organizations.organization_id"),
         index=True,
-        default="org_dev",
     )
 
     organization_name: Mapped[str] = mapped_column(String(255), default="Local Development Tenant")
@@ -98,7 +100,6 @@ class WebsiteMonitor(Base):
         String(255),
         ForeignKey("organizations.organization_id"),
         index=True,
-        default="org_dev",
     )
 
     name: Mapped[str] = mapped_column(String(255))
@@ -125,7 +126,6 @@ class WebsiteCheckResult(Base):
         String(255),
         ForeignKey("organizations.organization_id"),
         index=True,
-        default="org_dev",
     )
 
     website_id: Mapped[str] = mapped_column(String(255), index=True)
