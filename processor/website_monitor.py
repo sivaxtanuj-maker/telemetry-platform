@@ -3,38 +3,102 @@ import json
 import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
+import asyncpg
 import httpx
 from aiokafka import AIOKafkaProducer
 
 
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://aether:aether_password@localhost:5432/aether_db",
+)
+
 WEBSITE_TOPIC = "website-monitor-stream"
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-WEBSITES_FILE = PROJECT_ROOT / "gateway" / "data" / "websites.json"
-
 producer = None
+db_pool = None
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 def utc_now_iso():
-    return datetime.now(timezone.utc).isoformat()
+    return utc_now().isoformat()
 
 
-def read_websites():
-    if not WEBSITES_FILE.exists():
-        return {}
+async def fetch_websites():
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                website_id,
+                name,
+                url,
+                expected_status,
+                check_interval_seconds,
+                status,
+                last_checked,
+                last_status_code,
+                last_latency_ms,
+                last_error,
+                created_at
+            FROM website_monitors
+            ORDER BY created_at DESC
+            """
+        )
 
-    try:
-        return json.loads(WEBSITES_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
+    return [dict(row) for row in rows]
 
 
-def write_websites(websites):
-    WEBSITES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    WEBSITES_FILE.write_text(json.dumps(websites, indent=2), encoding="utf-8")
+async def update_website_result(result):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE website_monitors
+            SET
+                status = $1,
+                last_checked = $2,
+                last_status_code = $3,
+                last_latency_ms = $4,
+                last_error = $5
+            WHERE website_id = $6
+            """,
+            result["status"],
+            datetime.fromisoformat(result["timestamp"]),
+            result["status_code"],
+            result["latency_ms"],
+            result["error"],
+            result["website_id"],
+        )
+
+        await conn.execute(
+            """
+            INSERT INTO website_check_results (
+                website_id,
+                name,
+                url,
+                status,
+                expected_status,
+                status_code,
+                latency_ms,
+                error,
+                checked_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            result["website_id"],
+            result["name"],
+            result["url"],
+            result["status"],
+            result["expected_status"],
+            result["status_code"],
+            result["latency_ms"],
+            result["error"],
+            datetime.fromisoformat(result["timestamp"]),
+        )
 
 
 async def check_website(client, website):
@@ -93,20 +157,23 @@ async def publish_result(result):
 
 async def monitor_loop():
     global producer
+    global db_pool
 
     print("🌐 Starting AETHER Website Monitor worker...")
-    print(f"📁 Reading monitors from: {WEBSITES_FILE}")
+    print(f"🗄️  Reading monitors from Postgres: {DATABASE_URL}")
     print(f"📡 Publishing results to Kafka topic: {WEBSITE_TOPIC}")
 
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
     await producer.start()
+
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
 
     last_checked_by_site = {}
 
     try:
         async with httpx.AsyncClient() as client:
             while True:
-                websites = read_websites()
+                websites = await fetch_websites()
                 now = time.time()
 
                 if not websites:
@@ -114,7 +181,8 @@ async def monitor_loop():
                     await asyncio.sleep(5)
                     continue
 
-                for website_id, website in websites.items():
+                for website in websites:
+                    website_id = website["website_id"]
                     interval = int(website.get("check_interval_seconds", 10))
                     last_checked = last_checked_by_site.get(website_id, 0)
 
@@ -123,13 +191,7 @@ async def monitor_loop():
 
                     result = await check_website(client, website)
 
-                    websites[website_id]["status"] = result["status"]
-                    websites[website_id]["last_checked"] = result["timestamp"]
-                    websites[website_id]["last_status_code"] = result["status_code"]
-                    websites[website_id]["last_latency_ms"] = result["latency_ms"]
-                    websites[website_id]["last_error"] = result["error"]
-
-                    write_websites(websites)
+                    await update_website_result(result)
                     await publish_result(result)
 
                     last_checked_by_site[website_id] = now
@@ -145,6 +207,7 @@ async def monitor_loop():
 
     finally:
         await producer.stop()
+        await db_pool.close()
 
 
 if __name__ == "__main__":

@@ -1,3 +1,9 @@
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from database import check_database_connection, get_db, init_database
+from db_models import WebsiteMonitor
+
 import json
 import os
 import secrets
@@ -8,10 +14,32 @@ from pathlib import Path
 from typing import Optional
 
 from aiokafka import AIOKafkaProducer
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from database import check_database_connection, init_database
+from database import check_database_connection, get_db, init_database
+
+
+def serialize_website_monitor(site: WebsiteMonitor):
+    return {
+        "website_id": site.website_id,
+        "name": site.name,
+        "url": site.url,
+        "expected_status": site.expected_status,
+        "check_interval_seconds": site.check_interval_seconds,
+        "status": site.status,
+        "last_checked": site.last_checked.isoformat() if site.last_checked else None,
+        "last_status_code": site.last_status_code,
+        "last_latency_ms": site.last_latency_ms,
+        "last_error": site.last_error,
+        "created_at": site.created_at.isoformat() if site.created_at else None,
+    }
+
+
+
+
+
+
 
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -217,9 +245,10 @@ app.add_middleware(
 )
 
 @app.post("/api/v1/websites")
-async def create_website_monitor(payload: WebsiteCreateRequest):
-    websites = read_json(WEBSITES_FILE)
-
+async def create_website_monitor(
+    payload: WebsiteCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
     website_id = "site_" + secrets.token_urlsafe(8)
 
     url = payload.url.strip()
@@ -227,54 +256,62 @@ async def create_website_monitor(payload: WebsiteCreateRequest):
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
-    websites[website_id] = {
-        "website_id": website_id,
-        "name": payload.name,
-        "url": url,
-        "expected_status": payload.expected_status,
-        "check_interval_seconds": payload.check_interval_seconds,
-        "status": "unknown",
-        "last_checked": None,
-        "last_status_code": None,
-        "last_latency_ms": None,
-        "last_error": None,
-        "created_at": utc_now_iso(),
-    }
+    site = WebsiteMonitor(
+        website_id=website_id,
+        name=payload.name,
+        url=url,
+        expected_status=payload.expected_status,
+        check_interval_seconds=payload.check_interval_seconds,
+        status="unknown",
+        last_checked=None,
+        last_status_code=None,
+        last_latency_ms=None,
+        last_error=None,
+    )
 
-    write_json(WEBSITES_FILE, websites)
+    db.add(site)
+    await db.commit()
+    await db.refresh(site)
 
     return {
         "status": "created",
-        "website": websites[website_id],
+        "website": serialize_website_monitor(site),
     }
 
 
 @app.get("/api/v1/websites")
-async def list_website_monitors():
-    websites = read_json(WEBSITES_FILE)
+async def list_website_monitors(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(WebsiteMonitor).order_by(WebsiteMonitor.created_at.desc())
+    )
+
+    websites = result.scalars().all()
 
     return {
         "count": len(websites),
-        "websites": list(websites.values()),
+        "websites": [serialize_website_monitor(site) for site in websites],
     }
 
 
 @app.delete("/api/v1/websites/{website_id}")
-async def delete_website_monitor(website_id: str):
-    websites = read_json(WEBSITES_FILE)
+async def delete_website_monitor(
+    website_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    site = await db.get(WebsiteMonitor, website_id)
 
-    if website_id not in websites:
+    if not site:
         raise HTTPException(status_code=404, detail="Website monitor not found")
 
-    removed = websites.pop(website_id)
+    removed = serialize_website_monitor(site)
 
-    write_json(WEBSITES_FILE, websites)
+    await db.delete(site)
+    await db.commit()
 
     return {
         "status": "deleted",
         "website": removed,
     }
-
 
 
 

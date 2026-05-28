@@ -1,3 +1,5 @@
 aiokafka
 websockets
 aiohttp
+httpx
+asyncpg
