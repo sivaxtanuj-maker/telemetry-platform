@@ -120,3 +120,18 @@ async def websocket_root(websocket: WebSocket):
     except WebSocketDisconnect:
         clients.discard(websocket)
         print(f"WebSocket client disconnected. Total clients: {len(clients)}")
+
+
+
+
+
+@app.get("/health")
+async def health_check():
+    kafka_status = producer is not None
+
+    return {
+        "service": "aether-gateway",
+        "status": "online",
+        "kafka_connected": kafka_status,
+        "ingest_endpoint": "/api/v1/telemetry"
+    }
