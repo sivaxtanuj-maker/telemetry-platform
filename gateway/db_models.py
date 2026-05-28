@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text
+
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -9,10 +10,45 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    organization_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    plan: Mapped[str] = mapped_column(String(50), default="dev")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("organizations.organization_id"),
+        index=True,
+    )
+
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    role: Mapped[str] = mapped_column(String(50), default="owner")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Device(Base):
     __tablename__ = "devices"
 
     device_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+    organization_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("organizations.organization_id"),
+        index=True,
+        default="org_dev",
+    )
+
     display_name: Mapped[str] = mapped_column(String(255))
     organization_name: Mapped[str] = mapped_column(String(255), default="Local Development Tenant")
 
@@ -34,6 +70,14 @@ class EnrollmentToken(Base):
     __tablename__ = "enrollment_tokens"
 
     token: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+    organization_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("organizations.organization_id"),
+        index=True,
+        default="org_dev",
+    )
+
     organization_name: Mapped[str] = mapped_column(String(255), default="Local Development Tenant")
     requested_device_name: Mapped[str] = mapped_column(String(255))
 
@@ -49,6 +93,14 @@ class WebsiteMonitor(Base):
     __tablename__ = "website_monitors"
 
     website_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+    organization_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("organizations.organization_id"),
+        index=True,
+        default="org_dev",
+    )
+
     name: Mapped[str] = mapped_column(String(255))
     url: Mapped[str] = mapped_column(Text)
 
@@ -68,6 +120,13 @@ class WebsiteCheckResult(Base):
     __tablename__ = "website_check_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    organization_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("organizations.organization_id"),
+        index=True,
+        default="org_dev",
+    )
 
     website_id: Mapped[str] = mapped_column(String(255), index=True)
     name: Mapped[str] = mapped_column(String(255))

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import check_database_connection, get_db, init_database
-from db_models import Device, EnrollmentToken, WebsiteMonitor
+from db_models import Device, EnrollmentToken, Organization, User, WebsiteMonitor
 
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -22,11 +22,15 @@ TELEMETRY_TOPIC = "telemetry-stream"
 
 DEV_API_KEY = "dev-api-key"
 
+DEV_ORG_ID = "org_dev"
+DEV_USER_ID = "user_dev"
+DEV_USER_EMAIL = "dev@aether.local"
+
 producer: Optional[AIOKafkaProducer] = None
 
 
 # -----------------------------
-# Utility helpers
+# Time helpers
 # -----------------------------
 
 def utc_now():
@@ -37,6 +41,56 @@ def utc_now_iso():
     return utc_now().isoformat()
 
 
+# -----------------------------
+# Dev workspace helpers
+# -----------------------------
+
+async def ensure_dev_workspace(db: AsyncSession):
+    organization = await db.get(Organization, DEV_ORG_ID)
+
+    if not organization:
+        organization = Organization(
+            organization_id=DEV_ORG_ID,
+            name="Local Development Tenant",
+            plan="dev",
+        )
+        db.add(organization)
+
+    user = await db.get(User, DEV_USER_ID)
+
+    if not user:
+        user = User(
+            user_id=DEV_USER_ID,
+            organization_id=DEV_ORG_ID,
+            email=DEV_USER_EMAIL,
+            full_name="Dev User",
+            role="owner",
+        )
+        db.add(user)
+
+    await db.commit()
+
+    return {
+        "organization_id": DEV_ORG_ID,
+        "user_id": DEV_USER_ID,
+        "email": DEV_USER_EMAIL,
+    }
+
+
+async def get_current_workspace(db: AsyncSession = Depends(get_db)):
+    """
+    Temporary dev auth.
+
+    Later this becomes real Clerk/Supabase auth.
+    For now, every dashboard/API request belongs to org_dev.
+    """
+    return await ensure_dev_workspace(db)
+
+
+# -----------------------------
+# General helpers
+# -----------------------------
+
 def sanitize_device_id(name: str):
     cleaned = "".join(
         ch if ch.isalnum() or ch in ["-", "_"] else "-"
@@ -46,10 +100,20 @@ def sanitize_device_id(name: str):
     return cleaned or f"Device-{uuid.uuid4().hex[:8]}"
 
 
-async def make_unique_device_id(requested_name: str, db: AsyncSession):
+async def make_unique_device_id(
+    requested_name: str,
+    db: AsyncSession,
+    organization_id: str,
+):
     base = sanitize_device_id(requested_name)
 
-    existing = await db.get(Device, base)
+    result = await db.execute(
+        select(Device).where(
+            Device.organization_id == organization_id,
+            Device.device_id == base,
+        )
+    )
+    existing = result.scalar_one_or_none()
 
     if not existing:
         return base
@@ -58,7 +122,14 @@ async def make_unique_device_id(requested_name: str, db: AsyncSession):
 
     while True:
         candidate = f"{base}-{counter}"
-        existing = await db.get(Device, candidate)
+
+        result = await db.execute(
+            select(Device).where(
+                Device.organization_id == organization_id,
+                Device.device_id == candidate,
+            )
+        )
+        existing = result.scalar_one_or_none()
 
         if not existing:
             return candidate
@@ -98,8 +169,7 @@ async def validate_telemetry_api_key(
     if not api_key:
         raise HTTPException(status_code=401, detail="Missing API key")
 
-    # Local dev fallback.
-    # This lets your old local dev agents keep working.
+    # Local dev fallback. This lets your old local dev agents keep working.
     if api_key == DEV_API_KEY:
         return {
             "mode": "dev",
@@ -127,9 +197,14 @@ async def publish_to_kafka(packet: dict):
     )
 
 
+# -----------------------------
+# Serializers
+# -----------------------------
+
 def serialize_device(device: Device, include_api_key: bool = False):
     data = {
         "device_id": device.device_id,
+        "organization_id": device.organization_id,
         "display_name": device.display_name,
         "organization_name": device.organization_name,
         "hostname": device.hostname,
@@ -151,6 +226,7 @@ def serialize_device(device: Device, include_api_key: bool = False):
 def serialize_website_monitor(site: WebsiteMonitor):
     return {
         "website_id": site.website_id,
+        "organization_id": site.organization_id,
         "name": site.name,
         "url": site.url,
         "expected_status": site.expected_status,
@@ -203,10 +279,7 @@ async def lifespan(app: FastAPI):
         await init_database()
         print("Postgres tables ready.")
     except Exception as e:
-        print(
-            "Postgres unavailable during startup. "
-            f"Reason: {e}"
-        )
+        print(f"Postgres unavailable during startup. Reason: {e}")
         raise
 
     try:
@@ -240,13 +313,22 @@ app.add_middleware(
 # -----------------------------
 
 @app.get("/health")
-async def health(db: AsyncSession = Depends(get_db)):
+async def health(
+    db: AsyncSession = Depends(get_db),
+    workspace: dict = Depends(get_current_workspace),
+):
     db_connected = await check_database_connection()
 
-    devices_result = await db.execute(select(Device))
+    devices_result = await db.execute(
+        select(Device).where(Device.organization_id == workspace["organization_id"])
+    )
     devices = devices_result.scalars().all()
 
-    websites_result = await db.execute(select(WebsiteMonitor))
+    websites_result = await db.execute(
+        select(WebsiteMonitor).where(
+            WebsiteMonitor.organization_id == workspace["organization_id"]
+        )
+    )
     websites = websites_result.scalars().all()
 
     return {
@@ -254,6 +336,8 @@ async def health(db: AsyncSession = Depends(get_db)):
         "service": "aether-gateway",
         "kafka_enabled": producer is not None,
         "database_connected": db_connected,
+        "organization_id": workspace["organization_id"],
+        "user_id": workspace["user_id"],
         "kafka_bootstrap": KAFKA_BOOTSTRAP,
         "device_count": len(devices),
         "website_monitor_count": len(websites),
@@ -269,6 +353,7 @@ async def health(db: AsyncSession = Depends(get_db)):
 async def create_website_monitor(
     payload: WebsiteCreateRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: dict = Depends(get_current_workspace),
 ):
     website_id = "site_" + secrets.token_urlsafe(8)
 
@@ -279,6 +364,7 @@ async def create_website_monitor(
 
     site = WebsiteMonitor(
         website_id=website_id,
+        organization_id=workspace["organization_id"],
         name=payload.name,
         url=url,
         expected_status=payload.expected_status,
@@ -301,9 +387,14 @@ async def create_website_monitor(
 
 
 @app.get("/api/v1/websites")
-async def list_website_monitors(db: AsyncSession = Depends(get_db)):
+async def list_website_monitors(
+    db: AsyncSession = Depends(get_db),
+    workspace: dict = Depends(get_current_workspace),
+):
     result = await db.execute(
-        select(WebsiteMonitor).order_by(WebsiteMonitor.created_at.desc())
+        select(WebsiteMonitor)
+        .where(WebsiteMonitor.organization_id == workspace["organization_id"])
+        .order_by(WebsiteMonitor.created_at.desc())
     )
 
     websites = result.scalars().all()
@@ -318,10 +409,11 @@ async def list_website_monitors(db: AsyncSession = Depends(get_db)):
 async def delete_website_monitor(
     website_id: str,
     db: AsyncSession = Depends(get_db),
+    workspace: dict = Depends(get_current_workspace),
 ):
     site = await db.get(WebsiteMonitor, website_id)
 
-    if not site:
+    if not site or site.organization_id != workspace["organization_id"]:
         raise HTTPException(status_code=404, detail="Website monitor not found")
 
     removed = serialize_website_monitor(site)
@@ -343,6 +435,7 @@ async def delete_website_monitor(
 async def create_enrollment_token(
     payload: EnrollmentTokenRequest,
     db: AsyncSession = Depends(get_db),
+    workspace: dict = Depends(get_current_workspace),
 ):
     token = "enroll_" + secrets.token_urlsafe(24)
     now = utc_now()
@@ -350,6 +443,7 @@ async def create_enrollment_token(
 
     token_record = EnrollmentToken(
         token=token,
+        organization_id=workspace["organization_id"],
         organization_name=payload.organization_name,
         requested_device_name=payload.device_name,
         created_at=now,
@@ -392,11 +486,18 @@ async def register_device(
         raise HTTPException(status_code=401, detail="Enrollment token expired")
 
     requested_name = token_record.requested_device_name or payload.hostname
-    device_id = await make_unique_device_id(requested_name, db)
+
+    device_id = await make_unique_device_id(
+        requested_name=requested_name,
+        db=db,
+        organization_id=token_record.organization_id,
+    )
+
     api_key = "device_" + secrets.token_urlsafe(32)
 
     device = Device(
         device_id=device_id,
+        organization_id=token_record.organization_id,
         display_name=requested_name,
         organization_name=token_record.organization_name,
         hostname=payload.hostname,
@@ -435,9 +536,14 @@ async def register_device(
 
 
 @app.get("/api/v1/devices")
-async def list_devices(db: AsyncSession = Depends(get_db)):
+async def list_devices(
+    db: AsyncSession = Depends(get_db),
+    workspace: dict = Depends(get_current_workspace),
+):
     result = await db.execute(
-        select(Device).order_by(Device.first_seen.desc())
+        select(Device)
+        .where(Device.organization_id == workspace["organization_id"])
+        .order_by(Device.first_seen.desc())
     )
 
     devices = result.scalars().all()
@@ -452,10 +558,11 @@ async def list_devices(db: AsyncSession = Depends(get_db)):
 async def delete_device(
     device_id: str,
     db: AsyncSession = Depends(get_db),
+    workspace: dict = Depends(get_current_workspace),
 ):
     device = await db.get(Device, device_id)
 
-    if not device:
+    if not device or device.organization_id != workspace["organization_id"]:
         raise HTTPException(status_code=404, detail="Device not found")
 
     removed = serialize_device(device)
@@ -499,11 +606,14 @@ async def receive_telemetry(
         await db.commit()
 
     elif auth_result["mode"] == "dev":
+        await ensure_dev_workspace(db)
+
         device = await db.get(Device, device_id)
 
         if not device:
             device = Device(
                 device_id=device_id,
+                organization_id=DEV_ORG_ID,
                 display_name=device_id,
                 organization_name=data.get(
                     "organization_name",
