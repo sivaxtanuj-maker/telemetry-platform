@@ -406,6 +406,24 @@ async def list_devices():
         "devices": safe_devices,
     }
 
+@app.delete("/api/v1/devices/{device_id}")
+async def delete_device(device_id: str):
+    devices = read_json(DEVICES_FILE)
+
+    if device_id not in devices:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    removed = devices.pop(device_id)
+
+    write_json(DEVICES_FILE, devices)
+
+    safe_removed = dict(removed)
+    safe_removed.pop("api_key", None)
+
+    return {
+        "status": "deleted",
+        "device": safe_removed,
+    }
 
 # -----------------------------
 # Telemetry ingest endpoint
