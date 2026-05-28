@@ -1,54 +1,24 @@
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from database import check_database_connection, get_db, init_database
-from db_models import WebsiteMonitor
-
 import json
 import os
 import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
 from aiokafka import AIOKafkaProducer
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from database import check_database_connection, get_db, init_database
-
-
-def serialize_website_monitor(site: WebsiteMonitor):
-    return {
-        "website_id": site.website_id,
-        "name": site.name,
-        "url": site.url,
-        "expected_status": site.expected_status,
-        "check_interval_seconds": site.check_interval_seconds,
-        "status": site.status,
-        "last_checked": site.last_checked.isoformat() if site.last_checked else None,
-        "last_status_code": site.last_status_code,
-        "last_latency_ms": site.last_latency_ms,
-        "last_error": site.last_error,
-        "created_at": site.created_at.isoformat() if site.created_at else None,
-    }
-
-
-
-
-
-
+from db_models import Device, EnrollmentToken, WebsiteMonitor
 
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TELEMETRY_TOPIC = "telemetry-stream"
-
-DATA_DIR = Path(__file__).parent / "data"
-DEVICES_FILE = DATA_DIR / "devices.json"
-TOKENS_FILE = DATA_DIR / "enrollment_tokens.json"
-WEBSITES_FILE = DATA_DIR / "websites.json"
 
 DEV_API_KEY = "dev-api-key"
 
@@ -67,32 +37,6 @@ def utc_now_iso():
     return utc_now().isoformat()
 
 
-def ensure_data_files():
-    DATA_DIR.mkdir(exist_ok=True)
-
-    if not DEVICES_FILE.exists():
-        DEVICES_FILE.write_text("{}", encoding="utf-8")
-
-    if not TOKENS_FILE.exists():
-        TOKENS_FILE.write_text("{}", encoding="utf-8")
-    
-    if not WEBSITES_FILE.exists():
-        WEBSITES_FILE.write_text("{}", encoding="utf-8")
-
-
-def read_json(path: Path):
-    ensure_data_files()
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-
-
-def write_json(path: Path, data):
-    ensure_data_files()
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
 def sanitize_device_id(name: str):
     cleaned = "".join(
         ch if ch.isalnum() or ch in ["-", "_"] else "-"
@@ -102,28 +46,24 @@ def sanitize_device_id(name: str):
     return cleaned or f"Device-{uuid.uuid4().hex[:8]}"
 
 
-def make_unique_device_id(requested_name: str):
-    devices = read_json(DEVICES_FILE)
+async def make_unique_device_id(requested_name: str, db: AsyncSession):
     base = sanitize_device_id(requested_name)
 
-    if base not in devices:
+    existing = await db.get(Device, base)
+
+    if not existing:
         return base
 
     counter = 2
-    while f"{base}-{counter}" in devices:
+
+    while True:
+        candidate = f"{base}-{counter}"
+        existing = await db.get(Device, candidate)
+
+        if not existing:
+            return candidate
+
         counter += 1
-
-    return f"{base}-{counter}"
-
-
-def find_device_by_api_key(api_key: str):
-    devices = read_json(DEVICES_FILE)
-
-    for device_id, device in devices.items():
-        if device.get("api_key") == api_key:
-            return device_id, device
-
-    return None, None
 
 
 def get_bearer_token(authorization: Optional[str]):
@@ -143,26 +83,36 @@ def get_bearer_token(authorization: Optional[str]):
     return token.strip()
 
 
-def validate_telemetry_api_key(api_key: Optional[str]):
+async def find_device_by_api_key(api_key: str, db: AsyncSession):
+    result = await db.execute(
+        select(Device).where(Device.api_key == api_key)
+    )
+
+    return result.scalar_one_or_none()
+
+
+async def validate_telemetry_api_key(
+    api_key: Optional[str],
+    db: AsyncSession,
+):
     if not api_key:
         raise HTTPException(status_code=401, detail="Missing API key")
 
-    # Local dev fallback so your existing dev agent still works.
+    # Local dev fallback.
+    # This lets your old local dev agents keep working.
     if api_key == DEV_API_KEY:
         return {
             "mode": "dev",
-            "device_id": None,
             "device": None,
         }
 
-    device_id, device = find_device_by_api_key(api_key)
+    device = await find_device_by_api_key(api_key, db)
 
     if not device:
         raise HTTPException(status_code=401, detail="Invalid device API key")
 
     return {
         "mode": "device",
-        "device_id": device_id,
         "device": device,
     }
 
@@ -175,6 +125,43 @@ async def publish_to_kafka(packet: dict):
         TELEMETRY_TOPIC,
         json.dumps(packet).encode("utf-8"),
     )
+
+
+def serialize_device(device: Device, include_api_key: bool = False):
+    data = {
+        "device_id": device.device_id,
+        "display_name": device.display_name,
+        "organization_name": device.organization_name,
+        "hostname": device.hostname,
+        "platform": device.platform,
+        "agent_version": device.agent_version,
+        "status": device.status,
+        "first_seen": device.first_seen.isoformat() if device.first_seen else None,
+        "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+        "last_metrics": device.last_metrics,
+        "remote_address": device.remote_address,
+    }
+
+    if include_api_key:
+        data["api_key"] = device.api_key
+
+    return data
+
+
+def serialize_website_monitor(site: WebsiteMonitor):
+    return {
+        "website_id": site.website_id,
+        "name": site.name,
+        "url": site.url,
+        "expected_status": site.expected_status,
+        "check_interval_seconds": site.check_interval_seconds,
+        "status": site.status,
+        "last_checked": site.last_checked.isoformat() if site.last_checked else None,
+        "last_status_code": site.last_status_code,
+        "last_latency_ms": site.last_latency_ms,
+        "last_error": site.last_error,
+        "created_at": site.created_at.isoformat() if site.created_at else None,
+    }
 
 
 # -----------------------------
@@ -193,6 +180,7 @@ class DeviceRegisterRequest(BaseModel):
     platform: str
     agent_version: str = "0.1.0"
 
+
 class WebsiteCreateRequest(BaseModel):
     name: str
     url: str
@@ -208,8 +196,6 @@ class WebsiteCreateRequest(BaseModel):
 async def lifespan(app: FastAPI):
     global producer
 
-    ensure_data_files()
-
     print("Starting gateway...")
 
     try:
@@ -217,7 +203,11 @@ async def lifespan(app: FastAPI):
         await init_database()
         print("Postgres tables ready.")
     except Exception as e:
-        print(f"Postgres unavailable during startup. Continuing in JSON fallback mode. Reason: {e}")
+        print(
+            "Postgres unavailable during startup. "
+            f"Reason: {e}"
+        )
+        raise
 
     try:
         producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
@@ -243,6 +233,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# -----------------------------
+# Health endpoint
+# -----------------------------
+
+@app.get("/health")
+async def health(db: AsyncSession = Depends(get_db)):
+    db_connected = await check_database_connection()
+
+    devices_result = await db.execute(select(Device))
+    devices = devices_result.scalars().all()
+
+    websites_result = await db.execute(select(WebsiteMonitor))
+    websites = websites_result.scalars().all()
+
+    return {
+        "status": "gateway-online",
+        "service": "aether-gateway",
+        "kafka_enabled": producer is not None,
+        "database_connected": db_connected,
+        "kafka_bootstrap": KAFKA_BOOTSTRAP,
+        "device_count": len(devices),
+        "website_monitor_count": len(websites),
+        "ingest_endpoint": "/api/v1/telemetry",
+    }
+
+
+# -----------------------------
+# Website monitor endpoints
+# -----------------------------
 
 @app.post("/api/v1/websites")
 async def create_website_monitor(
@@ -314,60 +335,39 @@ async def delete_website_monitor(
     }
 
 
-
-
-
-
-
-
-
-# -----------------------------
-# Health endpoint
-# -----------------------------
-
-@app.get("/health")
-async def health():
-    db_connected = await check_database_connection()
-
-    return {
-        "status": "gateway-online",
-        "service": "aether-gateway",
-        "kafka_enabled": producer is not None,
-        "database_connected": db_connected,
-        "kafka_bootstrap": KAFKA_BOOTSTRAP,
-        "device_count": len(read_json(DEVICES_FILE)),
-        "ingest_endpoint": "/api/v1/telemetry",
-    }
-
-
 # -----------------------------
 # Device enrollment endpoints
 # -----------------------------
 
 @app.post("/api/v1/devices/enrollment-token")
-async def create_enrollment_token(payload: EnrollmentTokenRequest):
-    tokens = read_json(TOKENS_FILE)
-
+async def create_enrollment_token(
+    payload: EnrollmentTokenRequest,
+    db: AsyncSession = Depends(get_db),
+):
     token = "enroll_" + secrets.token_urlsafe(24)
     now = utc_now()
     expires_at = now + timedelta(minutes=payload.expires_in_minutes)
 
-    tokens[token] = {
-        "token": token,
-        "organization_name": payload.organization_name,
-        "requested_device_name": payload.device_name,
-        "created_at": now.isoformat(),
-        "expires_at": expires_at.isoformat(),
-        "used": False,
-    }
+    token_record = EnrollmentToken(
+        token=token,
+        organization_name=payload.organization_name,
+        requested_device_name=payload.device_name,
+        created_at=now,
+        expires_at=expires_at,
+        used=False,
+        used_by_device_id=None,
+        used_at=None,
+    )
 
-    write_json(TOKENS_FILE, tokens)
+    db.add(token_record)
+    await db.commit()
+    await db.refresh(token_record)
 
     return {
-        "enrollment_token": token,
-        "organization_name": payload.organization_name,
-        "device_name": payload.device_name,
-        "expires_at": expires_at.isoformat(),
+        "enrollment_token": token_record.token,
+        "organization_name": token_record.organization_name,
+        "device_name": token_record.requested_device_name,
+        "expires_at": token_record.expires_at.isoformat(),
         "register_endpoint": "/api/v1/devices/register",
         "local_gateway_url": "http://localhost:8000/api/v1/telemetry",
         "lan_gateway_url_template": "http://YOUR_WINDOWS_IP:8000/api/v1/telemetry",
@@ -375,103 +375,99 @@ async def create_enrollment_token(payload: EnrollmentTokenRequest):
 
 
 @app.post("/api/v1/devices/register")
-async def register_device(payload: DeviceRegisterRequest, request: Request):
-    tokens = read_json(TOKENS_FILE)
-    devices = read_json(DEVICES_FILE)
-
-    token_record = tokens.get(payload.enrollment_token)
+async def register_device(
+    payload: DeviceRegisterRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    token_record = await db.get(EnrollmentToken, payload.enrollment_token)
 
     if not token_record:
         raise HTTPException(status_code=401, detail="Invalid enrollment token")
 
-    if token_record.get("used"):
+    if token_record.used:
         raise HTTPException(status_code=401, detail="Enrollment token already used")
 
-    expires_at = datetime.fromisoformat(token_record["expires_at"])
-
-    if utc_now() > expires_at:
+    if utc_now() > token_record.expires_at:
         raise HTTPException(status_code=401, detail="Enrollment token expired")
 
-    requested_name = token_record.get("requested_device_name") or payload.hostname
-    device_id = make_unique_device_id(requested_name)
+    requested_name = token_record.requested_device_name or payload.hostname
+    device_id = await make_unique_device_id(requested_name, db)
     api_key = "device_" + secrets.token_urlsafe(32)
 
-    device = {
-        "device_id": device_id,
-        "display_name": requested_name,
-        "organization_name": token_record["organization_name"],
-        "hostname": payload.hostname,
-        "platform": payload.platform,
-        "agent_version": payload.agent_version,
-        "api_key": api_key,
-        "status": "registered",
-        "first_seen": utc_now_iso(),
-        "last_seen": None,
-        "last_metrics": None,
-        "remote_address": request.client.host if request.client else None,
-    }
+    device = Device(
+        device_id=device_id,
+        display_name=requested_name,
+        organization_name=token_record.organization_name,
+        hostname=payload.hostname,
+        platform=payload.platform,
+        agent_version=payload.agent_version,
+        api_key=api_key,
+        status="registered",
+        first_seen=utc_now(),
+        last_seen=None,
+        last_metrics=None,
+        remote_address=request.client.host if request.client else None,
+    )
 
-    devices[device_id] = device
+    token_record.used = True
+    token_record.used_by_device_id = device_id
+    token_record.used_at = utc_now()
 
-    token_record["used"] = True
-    token_record["used_by_device_id"] = device_id
-    token_record["used_at"] = utc_now_iso()
-
-    tokens[payload.enrollment_token] = token_record
-
-    write_json(DEVICES_FILE, devices)
-    write_json(TOKENS_FILE, tokens)
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
 
     return {
         "status": "registered",
-        "device_id": device_id,
-        "device_api_key": api_key,
-        "organization_name": device["organization_name"],
+        "device_id": device.device_id,
+        "device_api_key": device.api_key,
+        "organization_name": device.organization_name,
         "gateway_url": "http://localhost:8000/api/v1/telemetry",
         "config": {
             "gateway_url": "http://localhost:8000/api/v1/telemetry",
-            "device_id": device_id,
-            "organization_name": device["organization_name"],
-            "api_key": api_key,
+            "device_id": device.device_id,
+            "organization_name": device.organization_name,
+            "api_key": device.api_key,
             "tick_rate": 2.0,
         },
     }
 
 
 @app.get("/api/v1/devices")
-async def list_devices():
-    devices = read_json(DEVICES_FILE)
+async def list_devices(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Device).order_by(Device.first_seen.desc())
+    )
 
-    safe_devices = []
-
-    for device_id, device in devices.items():
-        cleaned = dict(device)
-        cleaned.pop("api_key", None)
-        safe_devices.append(cleaned)
+    devices = result.scalars().all()
 
     return {
-        "count": len(safe_devices),
-        "devices": safe_devices,
+        "count": len(devices),
+        "devices": [serialize_device(device) for device in devices],
     }
 
-@app.delete("/api/v1/devices/{device_id}")
-async def delete_device(device_id: str):
-    devices = read_json(DEVICES_FILE)
 
-    if device_id not in devices:
+@app.delete("/api/v1/devices/{device_id}")
+async def delete_device(
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    device = await db.get(Device, device_id)
+
+    if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    removed = devices.pop(device_id)
+    removed = serialize_device(device)
 
-    write_json(DEVICES_FILE, devices)
-
-    safe_removed = dict(removed)
-    safe_removed.pop("api_key", None)
+    await db.delete(device)
+    await db.commit()
 
     return {
         "status": "deleted",
-        "device": safe_removed,
+        "device": removed,
     }
+
 
 # -----------------------------
 # Telemetry ingest endpoint
@@ -481,50 +477,57 @@ async def delete_device(device_id: str):
 async def receive_telemetry(
     data: dict,
     authorization: Optional[str] = Header(default=None),
+    db: AsyncSession = Depends(get_db),
 ):
     api_key = get_bearer_token(authorization)
-    auth_result = validate_telemetry_api_key(api_key)
+    auth_result = await validate_telemetry_api_key(api_key, db)
 
     device_id = data.get("device_id", "unknown-device")
 
-    devices = read_json(DEVICES_FILE)
-
     if auth_result["mode"] == "device":
-        registered_device_id = auth_result["device_id"]
+        device = auth_result["device"]
 
-        if device_id != registered_device_id:
+        if device_id != device.device_id:
             data["original_device_id"] = device_id
-            data["device_id"] = registered_device_id
-            device_id = registered_device_id
+            data["device_id"] = device.device_id
+            device_id = device.device_id
 
-        if registered_device_id in devices:
-            devices[registered_device_id]["status"] = "online"
-            devices[registered_device_id]["last_seen"] = utc_now_iso()
-            devices[registered_device_id]["last_metrics"] = data.get("metrics", {})
-            write_json(DEVICES_FILE, devices)
+        device.status = "online"
+        device.last_seen = utc_now()
+        device.last_metrics = data.get("metrics", {})
+
+        await db.commit()
 
     elif auth_result["mode"] == "dev":
-        if device_id not in devices:
-            devices[device_id] = {
-                "device_id": device_id,
-                "display_name": device_id,
-                "organization_name": data.get("organization_name", "Local Development Tenant"),
-                "hostname": device_id,
-                "platform": "dev",
-                "agent_version": "dev",
-                "api_key": DEV_API_KEY,
-                "status": "online",
-                "first_seen": utc_now_iso(),
-                "last_seen": utc_now_iso(),
-                "last_metrics": data.get("metrics", {}),
-                "remote_address": None,
-            }
-        else:
-            devices[device_id]["status"] = "online"
-            devices[device_id]["last_seen"] = utc_now_iso()
-            devices[device_id]["last_metrics"] = data.get("metrics", {})
+        device = await db.get(Device, device_id)
 
-        write_json(DEVICES_FILE, devices)
+        if not device:
+            device = Device(
+                device_id=device_id,
+                display_name=device_id,
+                organization_name=data.get(
+                    "organization_name",
+                    "Local Development Tenant",
+                ),
+                hostname=device_id,
+                platform="dev",
+                agent_version="dev",
+                api_key="dev_" + secrets.token_urlsafe(24),
+                status="online",
+                first_seen=utc_now(),
+                last_seen=utc_now(),
+                last_metrics=data.get("metrics", {}),
+                remote_address=None,
+            )
+
+            db.add(device)
+
+        else:
+            device.status = "online"
+            device.last_seen = utc_now()
+            device.last_metrics = data.get("metrics", {})
+
+        await db.commit()
 
     print(f"Telemetry accepted from device: {device_id}")
 
