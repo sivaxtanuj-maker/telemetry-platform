@@ -29,6 +29,7 @@ LAST_MESSAGE_AT = None
 MESSAGE_COUNTS = {
     METRICS_TOPIC: 0,
     ALERTS_TOPIC: 0,
+   WEBSITE_TOPIC: 0,
 }
 
 
@@ -86,6 +87,7 @@ async def consume_topic(topic_name):
         async for msg in consumer:
             LAST_MESSAGE_TOPIC = topic_name
             LAST_MESSAGE_AT = utc_now_iso()
+            MESSAGE_COUNTS.setdefault(topic_name, 0)
             MESSAGE_COUNTS[topic_name] += 1
 
             print(f"📨 Message received from Kafka topic [{topic_name}]: {msg.value[:80]}")
