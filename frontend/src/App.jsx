@@ -140,8 +140,10 @@ function AddDevicePanel({ enrollmentDeviceName, setEnrollmentDeviceName, enrollm
   const token = enrollmentResult?.enrollment_token;
   
   const windowsCommand = token ? `cd C:\\Users\\Tanuj\\telemetry-platform\nSet-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned\n.\\install\\install_windows_agent.ps1 -EnrollmentToken "${token}" -GatewayUrl "${cleanServerUrl}" -UseLocalSource` : "";
-  const linuxCommand = token ? `cd /mnt/c/Users/Tanuj/telemetry-platform\n./install/install_linux_agent.sh --token "${token}" --gateway-url "${cleanServerUrl}" --use-local-source` : "";
-
+  const linuxGatewayUrl = cleanServerUrl.includes("localhost") ? "http://$(ip route | awk '/default/ {print $3}'):8000"  : cleanServerUrl;
+  const linuxCommand = token ? `cd /mnt/c/Users/Tanuj/telemetry-platform\n./install/install_linux_agent.sh --token "${token}" --gateway-url "${linuxGatewayUrl}" --use-local-source`
+   : "";
+  
   async function copyCommand(label, value) {
     try {
       await navigator.clipboard.writeText(value);
