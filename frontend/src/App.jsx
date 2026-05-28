@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Bell, Check, Copy, Cpu, Gauge, HardDrive, Network, Server, ShieldCheck, Zap } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import WebsiteMonitorPanel from "./components/WebsiteMonitorPanel";
+import RegisteredDevicesPanel from "./components/RegisteredDevicesPanel";
 
 const MAX_HISTORY = 42;
 const MAX_ALERTS = 30;
@@ -310,6 +311,8 @@ export default function App() {
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
   const [enrollmentError, setEnrollmentError] = useState(null);
   const [nowMs, setNowMs] = useState(Date.now());
+  const [registeredDevices, setRegisteredDevices] = useState([]);
+  const [registeredDevicesError, setRegisteredDevicesError] = useState(null);
 
   useEffect(() => {
     const interval = setInterval(() => setNowMs(Date.now()), 1000);
@@ -358,6 +361,16 @@ export default function App() {
     const interval = setInterval(fetchHealth, 3000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+useEffect(() => {
+  refreshRegisteredDevices();
+  const interval = setInterval(refreshRegisteredDevices, 5000);
+
+  return () => clearInterval(interval);
+}, []);
+
+
+
 
   useEffect(() => {
     let socket;
@@ -456,6 +469,43 @@ export default function App() {
     }
   }
 
+function handleDeleteRegisteredDevice(deviceId) {
+  setRegisteredDevices((prev) =>
+    prev.filter((device) => device.device_id !== deviceId)
+  );
+
+  setMetrics((prev) => {
+    const next = { ...prev };
+    delete next[deviceId];
+    return next;
+  });
+}
+
+
+
+
+
+
+
+
+  async function refreshRegisteredDevices() {
+  try {
+    const response = await fetch(`${GATEWAY_API_BASE}/api/v1/devices`);
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch registered devices");
+    }
+
+    const data = await response.json();
+    setRegisteredDevices(data.devices || []);
+    setRegisteredDevicesError(null);
+  } catch (error) {
+    setRegisteredDevicesError(
+      error.message || "Failed to fetch registered devices"
+    );
+  }
+}
+
   const devices = Object.entries(metrics);
   const summary = useMemo(() => {
     const activeNodes = devices.map(([, node]) => node).filter((node) => nowMs - Number(node.lastUpdatedTimestamp || 0) <= NODE_TIMEOUT_MS);
@@ -495,6 +545,7 @@ export default function App() {
         
         <SystemStatusPanel gatewayHealth={gatewayHealth} streamerHealth={streamerHealth} healthError={healthError} />
         <WebsiteMonitorPanel gatewayBaseUrl={GATEWAY_API_BASE} websites={websites} setWebsites={setWebsites} refreshWebsites={refreshWebsites} />
+        <RegisteredDevicesPanel gatewayBaseUrl={GATEWAY_API_BASE}  devices={registeredDevices} refreshDevices={refreshRegisteredDevices}   onDeleteDevice={handleDeleteRegisteredDevice}   error={registeredDevicesError} />
         <AddDevicePanel enrollmentDeviceName={enrollmentDeviceName} setEnrollmentDeviceName={setEnrollmentDeviceName} enrollmentOrgName={enrollmentOrgName} setEnrollmentOrgName={setEnrollmentOrgName} enrollmentServerUrl={enrollmentServerUrl} setEnrollmentServerUrl={setEnrollmentServerUrl} enrollmentResult={enrollmentResult} enrollmentLoading={enrollmentLoading} enrollmentError={enrollmentError} onCreateEnrollmentToken={createEnrollmentToken} />
         
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-12">

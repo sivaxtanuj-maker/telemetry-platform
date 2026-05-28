@@ -14,6 +14,8 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\gateway
 Start-Sleep -Seconds 3
 
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\processor'; ..\.venv\Scripts\Activate.ps1; python streamer.py"
+Start-Sleep -Seconds 2
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$Root\processor'; ..\.venv\Scripts\Activate.ps1; python website_monitor.py"
 
 Start-Sleep -Seconds 3
 
