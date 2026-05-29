@@ -95,10 +95,7 @@ def get_bearer_token(authorization: Optional[str]):
 
 
 async def find_device_by_api_key(api_key: str, db: AsyncSession):
-    result = await db.execute(
-        select(Device).where(Device.api_key == api_key)
-    )
-
+    result = await db.execute(select(Device).where(Device.api_key == api_key))
     return result.scalar_one_or_none()
 
 
@@ -124,13 +121,22 @@ async def validate_telemetry_api_key(api_key: Optional[str], db: AsyncSession):
 
 
 async def publish_to_kafka(packet: dict):
+    """
+    Kafka is optional during the first Render gateway deployment.
+
+    If Kafka is not configured yet, this returns False instead of crashing
+    the gateway. Once cloud Kafka is configured, it will publish normally.
+    """
     if producer is None:
-        raise HTTPException(status_code=503, detail="Kafka producer unavailable")
+        print("Kafka producer unavailable. Skipping publish.")
+        return False
 
     await producer.send_and_wait(
         TELEMETRY_TOPIC,
         json.dumps(packet).encode("utf-8"),
     )
+
+    return True
 
 
 async def get_current_user(
@@ -277,8 +283,13 @@ async def lifespan(app: FastAPI):
 
     try:
         producer = get_kafka_producer()
-        await producer.start()
-        print(f"Kafka producer connected at {KAFKA_BOOTSTRAP_SERVERS}")
+
+        if producer is not None:
+            await producer.start()
+            print(f"Kafka producer connected at {KAFKA_BOOTSTRAP_SERVERS}")
+        else:
+            print("Kafka disabled because KAFKA_BOOTSTRAP_SERVERS is empty")
+
     except Exception as e:
         producer = None
         print(f"Kafka unavailable. Reason: {e}")
@@ -347,9 +358,7 @@ async def health(db: AsyncSession = Depends(get_db)):
 async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
     email = payload.email.lower().strip()
 
-    existing_result = await db.execute(
-        select(User).where(User.email == email)
-    )
+    existing_result = await db.execute(select(User).where(User.email == email))
     existing_user = existing_result.scalar_one_or_none()
 
     if existing_user:
@@ -399,9 +408,7 @@ async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     email = payload.email.lower().strip()
 
-    result = await db.execute(
-        select(User).where(User.email == email)
-    )
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(payload.password, user.password_hash):
@@ -748,12 +755,16 @@ async def receive_telemetry(
 
     print(f"Telemetry accepted from device: {device_id}")
 
-    await publish_to_kafka(data)
+    kafka_published = await publish_to_kafka(data)
 
-    print(f"Telemetry published to Kafka topic {TELEMETRY_TOPIC}: {device_id}")
+    if kafka_published:
+        print(f"Telemetry published to Kafka topic {TELEMETRY_TOPIC}: {device_id}")
+    else:
+        print(f"Telemetry stored but not published to Kafka: {device_id}")
 
     return {
-        "status": "published",
+        "status": "accepted",
         "device_id": device_id,
         "topic": TELEMETRY_TOPIC,
+        "kafka_published": kafka_published,
     }

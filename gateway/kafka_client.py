@@ -1,8 +1,9 @@
 import os
+
 from aiokafka import AIOKafkaProducer
 
 
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "").strip()
 
 KAFKA_SECURITY_PROTOCOL = os.getenv("KAFKA_SECURITY_PROTOCOL")
 KAFKA_SASL_MECHANISM = os.getenv("KAFKA_SASL_MECHANISM")
@@ -31,4 +32,7 @@ def kafka_auth_config():
 
 
 def get_kafka_producer():
+    if not KAFKA_BOOTSTRAP_SERVERS:
+        return None
+
     return AIOKafkaProducer(**kafka_auth_config())
