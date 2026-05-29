@@ -15,14 +15,13 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth_utils import create_access_token, hash_password, verify_password, decode_access_token
+from auth_utils import create_access_token, decode_access_token, hash_password, verify_password
 from database import check_database_connection, get_db, init_database
 from db_models import Device, EnrollmentToken, Organization, User, WebsiteMonitor
 
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TELEMETRY_TOPIC = "telemetry-stream"
-
 DEV_API_KEY = "dev-api-key"
 
 producer: Optional[AIOKafkaProducer] = None
@@ -258,7 +257,6 @@ async def lifespan(app: FastAPI):
     global producer
 
     print("Starting gateway...")
-
     print("Initializing Postgres database...")
     await init_database()
     print("Postgres tables ready.")
@@ -648,6 +646,8 @@ async def receive_telemetry(
             data["device_id"] = device.device_id
             device_id = device.device_id
 
+        data["organization_id"] = device.organization_id
+
         device.status = "online"
         device.last_seen = utc_now()
         device.last_metrics = data.get("metrics", {})
@@ -656,6 +656,7 @@ async def receive_telemetry(
 
     elif auth_result["mode"] == "dev":
         org_id = "org_dev"
+        data["organization_id"] = org_id
 
         organization = await db.get(Organization, org_id)
 
@@ -675,10 +676,7 @@ async def receive_telemetry(
                 device_id=device_id,
                 organization_id=org_id,
                 display_name=device_id,
-                organization_name=data.get(
-                    "organization_name",
-                    "Local Development Tenant",
-                ),
+                organization_name=data.get("organization_name", "Local Development Tenant"),
                 hostname=device_id,
                 platform="dev",
                 agent_version="dev",

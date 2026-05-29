@@ -4,13 +4,12 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
-  Check,
-  Copy,
   Cpu,
   Gauge,
   Globe,
   HardDrive,
   LayoutDashboard,
+  LogOut,
   Network,
   Server,
   ShieldCheck,
@@ -47,6 +46,33 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+function safeJsonParse(value, fallback = null) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getStoredOrganization() {
+  return safeJsonParse(localStorage.getItem("aether_organization"), null);
+}
+
+function getOrgNodeStorageKey(orgId) {
+  return `aether_nodes_${orgId}`;
+}
+
+function loadNodesForOrg(orgId) {
+  if (!orgId) return {};
+
+  try {
+    const saved = localStorage.getItem(getOrgNodeStorageKey(orgId));
+    return saved ? JSON.parse(saved) : {};
+  } catch {
+    return {};
+  }
+}
+
 function formatTime(date = new Date()) {
   return date.toLocaleTimeString([], {
     hour: "2-digit",
@@ -74,6 +100,218 @@ function severityFromAlert(alert) {
   if (cpu >= 90) return "CRITICAL";
   if (cpu >= 80) return "HIGH";
   return "MEDIUM";
+}
+
+function AuthScreen({ onAuthenticated }) {
+  const [mode, setMode] = useState("signup");
+  const [email, setEmail] = useState("accounta@example.com");
+  const [password, setPassword] = useState("Password123!");
+  const [fullName, setFullName] = useState("Tanuj");
+  const [organizationName, setOrganizationName] = useState("Account A Workspace");
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  async function submitAuth(event) {
+    event.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const endpoint =
+        mode === "signup"
+          ? `${GATEWAY_API_BASE}/api/v1/auth/signup`
+          : `${GATEWAY_API_BASE}/api/v1/auth/login`;
+
+      const body =
+        mode === "signup"
+          ? {
+              email,
+              password,
+              full_name: fullName,
+              organization_name: organizationName,
+            }
+          : {
+              email,
+              password,
+            };
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+
+        if (response.status === 409) {
+          throw new Error("That email already exists. Switch to Login.");
+        }
+
+        if (response.status === 401) {
+          throw new Error("Invalid email or password.");
+        }
+
+        throw new Error(text || "Authentication failed");
+      }
+
+      const data = await response.json();
+      onAuthenticated(data);
+    } catch (err) {
+      setError(err.message || "Authentication failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-[#090d16] text-slate-100">
+      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-10 px-6 py-8 lg:grid-cols-2">
+        <section className="flex flex-col justify-center">
+          <div className="mb-5 inline-flex w-fit rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-cyan-300">
+            AETHER Cloud
+          </div>
+
+          <h1 className="max-w-3xl text-4xl font-bold tracking-tight text-white sm:text-5xl">
+            Enterprise observability for websites, APIs, and infrastructure.
+          </h1>
+
+          <p className="mt-5 max-w-2xl text-sm leading-7 text-slate-400">
+            Create a workspace, add uptime checks without installing anything,
+            and enroll machines with an agent when you need CPU, memory, disk,
+            and anomaly telemetry.
+          </p>
+
+          <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-800 bg-[#0d1527]/70 p-4">
+              <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                Auth
+              </p>
+              <p className="mt-2 text-2xl font-bold text-white">JWT</p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-[#0d1527]/70 p-4">
+              <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                Storage
+              </p>
+              <p className="mt-2 text-2xl font-bold text-white">Postgres</p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-[#0d1527]/70 p-4">
+              <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                Stream
+              </p>
+              <p className="mt-2 text-2xl font-bold text-white">Kafka</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="flex items-center">
+          <form
+            onSubmit={submitAuth}
+            className="w-full rounded-2xl border border-slate-800/80 bg-[#0d1527]/60 p-6 shadow-2xl shadow-black/30 backdrop-blur"
+          >
+            <div className="mb-6">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                {mode === "signup" ? "Create Workspace" : "Login"}
+              </p>
+              <h2 className="mt-1 text-2xl font-bold text-white">
+                {mode === "signup" ? "Start monitoring" : "Welcome back"}
+              </h2>
+            </div>
+
+            <div className="space-y-4">
+              {mode === "signup" && (
+                <>
+                  <div>
+                    <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                      Full Name
+                    </label>
+                    <input
+                      value={fullName}
+                      onChange={(event) => setFullName(event.target.value)}
+                      className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                      Organization
+                    </label>
+                    <input
+                      value={organizationName}
+                      onChange={(event) =>
+                        setOrganizationName(event.target.value)
+                      }
+                      className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-cyan-300 hover:bg-cyan-500/20 disabled:opacity-50"
+            >
+              {loading
+                ? "Processing..."
+                : mode === "signup"
+                ? "Create Account"
+                : "Login"}
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode((prev) => (prev === "signup" ? "login" : "signup"));
+                setError(null);
+              }}
+              className="mt-4 w-full text-center text-xs text-slate-500 hover:text-cyan-300"
+            >
+              {mode === "signup"
+                ? "Already have an account? Login"
+                : "Need an account? Sign up"}
+            </button>
+          </form>
+        </section>
+      </div>
+    </div>
+  );
 }
 
 function OnboardingScreen({ onStartWebsite, onStartServer, onOpenDashboard }) {
@@ -115,29 +353,6 @@ function OnboardingScreen({ onStartWebsite, onStartServer, onOpenDashboard }) {
                 agent later if you want server-level metrics like CPU, RAM,
                 disk, and anomaly scoring.
               </p>
-
-              <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-xl border border-slate-800 bg-[#0d1527]/70 p-4">
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
-                    Website Checks
-                  </p>
-                  <p className="mt-2 text-2xl font-bold text-white">No Agent</p>
-                </div>
-
-                <div className="rounded-xl border border-slate-800 bg-[#0d1527]/70 p-4">
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
-                    Server Metrics
-                  </p>
-                  <p className="mt-2 text-2xl font-bold text-white">Agent</p>
-                </div>
-
-                <div className="rounded-xl border border-slate-800 bg-[#0d1527]/70 p-4">
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
-                    Event Stream
-                  </p>
-                  <p className="mt-2 text-2xl font-bold text-white">Kafka</p>
-                </div>
-              </div>
             </section>
 
             <section className="rounded-2xl border border-slate-800/80 bg-[#0d1527]/60 p-5 shadow-2xl shadow-black/30 backdrop-blur">
@@ -167,7 +382,7 @@ function OnboardingScreen({ onStartWebsite, onStartServer, onOpenDashboard }) {
                         </h4>
                         <p className="mt-1 text-sm leading-6 text-slate-400">
                           Check uptime, latency, HTTP status, API health, and
-                          failure events. No script or install required.
+                          failure events. No script required.
                         </p>
                       </div>
                     </div>
@@ -178,7 +393,7 @@ function OnboardingScreen({ onStartWebsite, onStartServer, onOpenDashboard }) {
 
                 <button
                   onClick={onStartServer}
-                  className="group w-full rounded-xl border border-slate-800 bg-slate-950/40 p-5 text-left transition hover:border-emerald-500/30 hover:bg-emerald-500/10"
+                  className="group w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-5 text-left transition hover:border-emerald-400/40 hover:bg-emerald-500/15"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex gap-4">
@@ -213,11 +428,11 @@ function OnboardingScreen({ onStartWebsite, onStartServer, onOpenDashboard }) {
 
                       <div>
                         <h4 className="font-semibold text-white">
-                          Open Existing Dashboard
+                          Open Dashboard
                         </h4>
                         <p className="mt-1 text-sm leading-6 text-slate-400">
-                          Skip onboarding and go directly to your current
-                          monitoring dashboard.
+                          Skip onboarding and go directly to your monitoring
+                          dashboard.
                         </p>
                       </div>
                     </div>
@@ -311,7 +526,7 @@ function SystemStatusPanel({ gatewayHealth, streamerHealth, healthError }) {
   const databaseOnline = Boolean(gatewayHealth?.database_connected);
   const streamerOnline = streamerHealth?.status === "online";
 
-  const statusItems = [
+  const items = [
     {
       label: "Gateway",
       value: gatewayOnline ? "Online" : "Offline",
@@ -375,7 +590,7 @@ function SystemStatusPanel({ gatewayHealth, streamerHealth, healthError }) {
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        {statusItems.map((item) => (
+        {items.map((item) => (
           <div
             key={item.label}
             className="rounded-xl border border-slate-800/70 bg-[#070b14]/60 p-4"
@@ -402,11 +617,7 @@ function SystemStatusPanel({ gatewayHealth, streamerHealth, healthError }) {
       </div>
 
       <div className="mt-4 rounded-xl border border-slate-800/60 bg-[#070b14]/50 px-4 py-3 font-mono text-[11px] text-slate-500">
-        Workspace:{" "}
-        <span className="text-cyan-400">
-          {gatewayHealth?.organization_id || "unknown"}
-        </span>{" "}
-        | Last Kafka message:{" "}
+        Last Kafka message:{" "}
         <span className="text-cyan-400">
           {streamerHealth?.last_message_topic || "none yet"}
         </span>{" "}
@@ -431,8 +642,6 @@ function AddDevicePanel({
   enrollmentError,
   onCreateEnrollmentToken,
 }) {
-  const [copiedCommand, setCopiedCommand] = useState(null);
-
   const cleanServerUrl = (enrollmentServerUrl || GATEWAY_API_BASE).replace(
     /\/$/,
     ""
@@ -451,16 +660,6 @@ function AddDevicePanel({
   const linuxCommand = token
     ? `cd /mnt/c/Users/Tanuj/telemetry-platform\n./install/install_linux_agent.sh --token "${token}" --gateway-url "${linuxGatewayUrl}" --use-local-source`
     : "";
-
-  async function copyCommand(label, value) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedCommand(label);
-      setTimeout(() => setCopiedCommand(null), 1500);
-    } catch {
-      setCopiedCommand(null);
-    }
-  }
 
   return (
     <Panel
@@ -481,8 +680,8 @@ function AddDevicePanel({
           <input
             value={enrollmentDeviceName}
             onChange={(event) => setEnrollmentDeviceName(event.target.value)}
-            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
             placeholder="Friend-Laptop-Node01"
+            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
           />
         </div>
 
@@ -493,8 +692,8 @@ function AddDevicePanel({
           <input
             value={enrollmentOrgName}
             onChange={(event) => setEnrollmentOrgName(event.target.value)}
-            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
             placeholder="Local Development Tenant"
+            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
           />
         </div>
 
@@ -505,8 +704,8 @@ function AddDevicePanel({
           <input
             value={enrollmentServerUrl}
             onChange={(event) => setEnrollmentServerUrl(event.target.value)}
-            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
             placeholder="http://localhost:8000"
+            className="w-full rounded-lg border border-slate-800 bg-[#070b14] px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
           />
         </div>
       </div>
@@ -551,64 +750,18 @@ function AddDevicePanel({
             </p>
           </div>
 
-          <div className="rounded-xl border border-slate-800/60 bg-[#070b14]/50 p-4 text-[11px] text-slate-500">
-            Run the command from the project root folder. The installer copies
-            the agent, creates a virtual environment, installs dependencies,
-            registers the device, saves config, and starts telemetry.
-          </div>
-
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Windows Installer Command
-                </p>
+            <textarea
+              readOnly
+              value={windowsCommand}
+              className="h-40 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
+            />
 
-                <button
-                  onClick={() => copyCommand("windows", windowsCommand)}
-                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 font-mono text-[10px] text-slate-400 hover:text-cyan-300"
-                >
-                  {copiedCommand === "windows" ? (
-                    <Check className="h-3 w-3" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                  {copiedCommand === "windows" ? "Copied" : "Copy"}
-                </button>
-              </div>
-
-              <textarea
-                readOnly
-                value={windowsCommand}
-                className="h-40 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
-              />
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Linux / Ubuntu Installer Command
-                </p>
-
-                <button
-                  onClick={() => copyCommand("linux", linuxCommand)}
-                  className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900/60 px-2 py-1 font-mono text-[10px] text-slate-400 hover:text-cyan-300"
-                >
-                  {copiedCommand === "linux" ? (
-                    <Check className="h-3 w-3" />
-                  ) : (
-                    <Copy className="h-3 w-3" />
-                  )}
-                  {copiedCommand === "linux" ? "Copied" : "Copy"}
-                </button>
-              </div>
-
-              <textarea
-                readOnly
-                value={linuxCommand}
-                className="h-40 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
-              />
-            </div>
+            <textarea
+              readOnly
+              value={linuxCommand}
+              className="h-40 w-full rounded-lg border border-slate-800 bg-[#070b14] p-3 font-mono text-xs text-slate-300 outline-none"
+            />
           </div>
         </div>
       )}
@@ -620,10 +773,8 @@ function DeviceCard({ deviceId, node, nowMs }) {
   const cpu = clamp(node.cpu);
   const ram = clamp(node.ram);
   const anomaly = clamp(node.anomaly);
-
   const lastUpdated = Number(node.lastUpdatedTimestamp || 0);
   const isOffline = nowMs - lastUpdated > NODE_TIMEOUT_MS;
-
   const isCritical = !isOffline && (cpu >= 85 || ram >= 90 || anomaly >= 75);
   const isWarn =
     !isOffline && !isCritical && (cpu >= 70 || ram >= 85 || anomaly >= 50);
@@ -656,7 +807,6 @@ function DeviceCard({ deviceId, node, nowMs }) {
                   : "text-emerald-400"
               )}
             />
-
             <h3 className="truncate text-sm font-semibold text-white">
               {deviceId}
             </h3>
@@ -685,43 +835,10 @@ function DeviceCard({ deviceId, node, nowMs }) {
 
       <div className="space-y-3.5">
         {[
-          [
-            "CORE_UTIL",
-            cpu,
-            Cpu,
-            isOffline
-              ? "bg-slate-800"
-              : cpu >= 85
-              ? "bg-rose-500"
-              : cpu >= 70
-              ? "bg-amber-400"
-              : "bg-emerald-400",
-          ],
-          [
-            "MEM_COMMIT",
-            ram,
-            HardDrive,
-            isOffline
-              ? "bg-slate-800"
-              : ram >= 90
-              ? "bg-rose-500"
-              : ram >= 85
-              ? "bg-amber-400"
-              : "bg-cyan-400",
-          ],
-          [
-            "AI_ANOMALY",
-            anomaly,
-            Activity,
-            isOffline
-              ? "bg-slate-800"
-              : anomaly >= 75
-              ? "bg-rose-500"
-              : anomaly >= 50
-              ? "bg-amber-400"
-              : "bg-indigo-400",
-          ],
-        ].map(([label, value, Icon, progressColor]) => (
+          ["CORE_UTIL", cpu, Cpu],
+          ["MEM_COMMIT", ram, HardDrive],
+          ["AI_ANOMALY", anomaly, Activity],
+        ].map(([label, value, Icon]) => (
           <div
             key={label}
             className="rounded-lg border border-slate-900/60 bg-[#070b14] p-2.5"
@@ -730,7 +847,6 @@ function DeviceCard({ deviceId, node, nowMs }) {
               <span className="flex items-center gap-1.5 font-medium text-slate-500">
                 <Icon className="h-3 w-3" /> {label}
               </span>
-
               <span className={isOffline ? "text-slate-600" : metricColor(value)}>
                 {Number(value).toFixed(1)}%
               </span>
@@ -738,10 +854,7 @@ function DeviceCard({ deviceId, node, nowMs }) {
 
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-900">
               <div
-                className={cx(
-                  "h-full rounded-full transition-all duration-500 ease-out",
-                  progressColor
-                )}
+                className="h-full rounded-full bg-cyan-400 transition-all duration-500 ease-out"
                 style={{ width: `${Math.min(value, 100)}%` }}
               />
             </div>
@@ -753,18 +866,26 @@ function DeviceCard({ deviceId, node, nowMs }) {
 }
 
 export default function App() {
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(() => {
-    return localStorage.getItem("aether_onboarded") === "true";
-  });
+  const [authToken, setAuthToken] = useState(
+    () => localStorage.getItem("aether_access_token") || ""
+  );
 
-  const [metrics, setMetrics] = useState(() => {
-    try {
-      const saved = localStorage.getItem("aether_nodes");
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [currentUser, setCurrentUser] = useState(() =>
+    safeJsonParse(localStorage.getItem("aether_user"), null)
+  );
+
+  const [currentOrganization, setCurrentOrganization] = useState(() =>
+    getStoredOrganization()
+  );
+
+  const currentOrgId = currentOrganization?.organization_id || "";
+
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(
+    () => localStorage.getItem("aether_onboarded") === "true"
+  );
+
+  const [metrics, setMetrics] = useState(() => loadNodesForOrg(currentOrgId));
+  const [loadedOrgId, setLoadedOrgId] = useState(currentOrgId);
 
   const [alerts, setAlerts] = useState([]);
   const [status, setStatus] = useState("OFFLINE");
@@ -793,6 +914,66 @@ export default function App() {
 
   const [nowMs, setNowMs] = useState(Date.now());
 
+  function clearLiveDashboardState() {
+    setWebsites([]);
+    setRegisteredDevices([]);
+    setMetrics({});
+    setAlerts([]);
+    setHistory([]);
+    setEnrollmentResult(null);
+    setEnrollmentError(null);
+    setRegisteredDevicesError(null);
+  }
+
+  function logout() {
+    localStorage.removeItem("aether_access_token");
+    localStorage.removeItem("aether_user");
+    localStorage.removeItem("aether_organization");
+    localStorage.removeItem("aether_onboarded");
+
+    setAuthToken("");
+    setCurrentUser(null);
+    setCurrentOrganization(null);
+    setLoadedOrgId("");
+    setHasCompletedOnboarding(false);
+    clearLiveDashboardState();
+  }
+
+  function handleAuthenticated(payload) {
+    localStorage.setItem("aether_access_token", payload.access_token);
+    localStorage.setItem("aether_user", JSON.stringify(payload.user));
+    localStorage.setItem(
+      "aether_organization",
+      JSON.stringify(payload.organization)
+    );
+
+    setAuthToken(payload.access_token);
+    setCurrentUser(payload.user);
+    setCurrentOrganization(payload.organization);
+    setHasCompletedOnboarding(false);
+    localStorage.removeItem("aether_onboarded");
+
+    clearLiveDashboardState();
+  }
+
+  async function apiFetch(url, options = {}) {
+    const headers = {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${authToken}`,
+    };
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401) {
+      logout();
+    }
+
+    return response;
+  }
+
   function completeOnboarding() {
     localStorage.setItem("aether_onboarded", "true");
     setHasCompletedOnboarding(true);
@@ -804,17 +985,68 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!currentOrgId) {
+      setMetrics({});
+      setLoadedOrgId("");
+      return;
+    }
+
+    setMetrics(loadNodesForOrg(currentOrgId));
+    setLoadedOrgId(currentOrgId);
+    setAlerts([]);
+    setHistory([]);
+    setWebsites([]);
+    setRegisteredDevices([]);
+    setEnrollmentResult(null);
+  }, [currentOrgId]);
+
+  useEffect(() => {
+    if (!currentOrgId || loadedOrgId !== currentOrgId) return;
+
+    localStorage.setItem(
+      getOrgNodeStorageKey(currentOrgId),
+      JSON.stringify(metrics)
+    );
+  }, [metrics, currentOrgId, loadedOrgId]);
+
+  useEffect(() => {
     const interval = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("aether_nodes", JSON.stringify(metrics));
-  }, [metrics]);
+    if (!authToken) return;
+
+    async function loadMe() {
+      try {
+        const response = await apiFetch(`${GATEWAY_API_BASE}/api/v1/me`);
+
+        if (!response.ok) {
+          throw new Error("Failed to load current user");
+        }
+
+        const data = await response.json();
+
+        setCurrentUser(data.user);
+        setCurrentOrganization(data.organization);
+        localStorage.setItem("aether_user", JSON.stringify(data.user));
+        localStorage.setItem(
+          "aether_organization",
+          JSON.stringify(data.organization)
+        );
+      } catch {
+        logout();
+      }
+    }
+
+    loadMe();
+  }, [authToken]);
 
   async function refreshWebsites() {
+    if (!authToken || !currentOrgId) return;
+
     try {
-      const response = await fetch(`${GATEWAY_API_BASE}/api/v1/websites`);
+      const response = await apiFetch(`${GATEWAY_API_BASE}/api/v1/websites`);
 
       if (!response.ok) {
         throw new Error("Failed to fetch websites");
@@ -822,14 +1054,16 @@ export default function App() {
 
       const data = await response.json();
       setWebsites(data.websites || []);
-    } catch (error) {
-      console.error("Failed to refresh websites:", error);
+    } catch (err) {
+      console.error("refreshWebsites:", err);
     }
   }
 
   async function refreshRegisteredDevices() {
+    if (!authToken || !currentOrgId) return;
+
     try {
-      const response = await fetch(`${GATEWAY_API_BASE}/api/v1/devices`);
+      const response = await apiFetch(`${GATEWAY_API_BASE}/api/v1/devices`);
 
       if (!response.ok) {
         throw new Error("Failed to fetch registered devices");
@@ -838,9 +1072,9 @@ export default function App() {
       const data = await response.json();
       setRegisteredDevices(data.devices || []);
       setRegisteredDevicesError(null);
-    } catch (error) {
+    } catch (err) {
       setRegisteredDevicesError(
-        error.message || "Failed to fetch registered devices"
+        err.message || "Failed to fetch registered devices"
       );
     }
   }
@@ -858,16 +1092,22 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!authToken || !currentOrgId) return;
+
     refreshWebsites();
     const interval = setInterval(refreshWebsites, 5000);
+
     return () => clearInterval(interval);
-  }, []);
+  }, [authToken, currentOrgId]);
 
   useEffect(() => {
+    if (!authToken || !currentOrgId) return;
+
     refreshRegisteredDevices();
     const interval = setInterval(refreshRegisteredDevices, 5000);
+
     return () => clearInterval(interval);
-  }, []);
+  }, [authToken, currentOrgId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -883,8 +1123,10 @@ export default function App() {
           throw new Error("Health endpoint returned non-200 response");
         }
 
-        const gatewayData = await gatewayResponse.json();
-        const streamerData = await streamerResponse.json();
+        const [gatewayData, streamerData] = await Promise.all([
+          gatewayResponse.json(),
+          streamerResponse.json(),
+        ]);
 
         if (!cancelled) {
           setGatewayHealth(gatewayData);
@@ -908,12 +1150,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!authToken || !currentOrgId) return;
+
     let socket;
 
     try {
       socket = new WebSocket(WS_URL);
-    } catch (error) {
-      console.error("WebSocket initialization failed:", error);
+    } catch (err) {
+      console.error("WebSocket initialization failed:", err);
       return undefined;
     }
 
@@ -926,9 +1170,13 @@ export default function App() {
         const data = JSON.parse(event.data);
         const now = new Date();
 
+        if (!data.organization_id || data.organization_id !== currentOrgId) {
+          return;
+        }
+
         if (data.packet_type === "WEBSITE") {
           setWebsites((prev) => {
-            const updatedSite = {
+            const updated = {
               website_id: data.website_id,
               organization_id: data.organization_id,
               name: data.name,
@@ -945,16 +1193,11 @@ export default function App() {
               (site) => site.website_id === data.website_id
             );
 
-            if (!exists) {
-              return [updatedSite, ...prev];
-            }
+            if (!exists) return [updated, ...prev];
 
             return prev.map((site) =>
               site.website_id === data.website_id
-                ? {
-                    ...site,
-                    ...updatedSite,
-                  }
+                ? { ...site, ...updated }
                 : site
             );
           });
@@ -962,65 +1205,10 @@ export default function App() {
           return;
         }
 
-        const lookupMetric = (payload, prefixes) => {
-          if (!payload || typeof payload !== "object") return null;
-
-          if (prefixes.includes("cpu") && payload.cpu_usage_pct !== undefined) {
-            return payload.cpu_usage_pct;
-          }
-
-          if (prefixes.includes("ram") && payload.memory_usage_pct !== undefined) {
-            return payload.memory_usage_pct;
-          }
-
-          if (
-            prefixes.includes("anomaly") &&
-            payload.anomaly_score !== undefined
-          ) {
-            return payload.anomaly_score;
-          }
-
-          const keys = Object.keys(payload);
-
-          for (const key of keys) {
-            const lowerKey = key.toLowerCase();
-
-            for (const p of prefixes) {
-              if (
-                lowerKey.startsWith(p) ||
-                lowerKey.includes("_" + p) ||
-                lowerKey.includes(p + "_")
-              ) {
-                if (typeof payload[key] === "number" || !isNaN(payload[key])) {
-                  return Number(payload[key]);
-                }
-              }
-            }
-          }
-
-          return null;
-        };
-
         const inner = data.metrics || {};
-
-        const cpu = clamp(
-          lookupMetric(inner, ["cpu", "util"]) ??
-            lookupMetric(data, ["cpu", "util", "value"]) ??
-            0
-        );
-
-        const ram = clamp(
-          lookupMetric(inner, ["ram", "mem"]) ??
-            lookupMetric(data, ["ram", "mem", "memory"]) ??
-            0
-        );
-
-        const anomaly = clamp(
-          lookupMetric(inner, ["anom", "score"]) ??
-            lookupMetric(data, ["anom", "score"]) ??
-            0
-        );
-
+        const cpu = clamp(inner.cpu_usage_pct ?? data.cpu_usage_pct ?? 0);
+        const ram = clamp(inner.memory_usage_pct ?? data.memory_usage_pct ?? 0);
+        const anomaly = clamp(inner.anomaly_score ?? data.anomaly_score ?? 0);
         const throughput = Math.round(inner.throughput ?? data.throughput ?? 12500);
 
         setHistory((prev) => [
@@ -1066,12 +1254,12 @@ export default function App() {
           },
         }));
       } catch (err) {
-        console.error("Parse exception:", err);
+        console.error("WS parse error:", err);
       }
     };
 
     return () => socket?.close();
-  }, []);
+  }, [authToken, currentOrgId]);
 
   async function createEnrollmentToken() {
     setEnrollmentLoading(true);
@@ -1079,17 +1267,17 @@ export default function App() {
     setEnrollmentResult(null);
 
     try {
-      const cleanServerUrl = enrollmentServerUrl.replace(/\/$/, "");
+      const cleanUrl = enrollmentServerUrl.replace(/\/$/, "");
 
-      const response = await fetch(
-        `${cleanServerUrl}/api/v1/devices/enrollment-token`,
+      const response = await apiFetch(
+        `${cleanUrl}/api/v1/devices/enrollment-token`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            organization_name: enrollmentOrgName,
+            organization_name: currentOrganization?.name || enrollmentOrgName,
             device_name: enrollmentDeviceName,
             expires_in_minutes: 60,
           }),
@@ -1103,8 +1291,8 @@ export default function App() {
 
       const data = await response.json();
       setEnrollmentResult(data);
-    } catch (error) {
-      setEnrollmentError(error.message || "Failed to create enrollment token");
+    } catch (err) {
+      setEnrollmentError(err.message || "Failed to create enrollment token");
     } finally {
       setEnrollmentLoading(false);
     }
@@ -1113,26 +1301,30 @@ export default function App() {
   const devices = Object.entries(metrics);
 
   const summary = useMemo(() => {
-    const activeNodes = devices
+    const active = devices
       .map(([, node]) => node)
       .filter(
-        (node) => nowMs - Number(node.lastUpdatedTimestamp || 0) <= NODE_TIMEOUT_MS
+        (node) =>
+          nowMs - Number(node.lastUpdatedTimestamp || 0) <= NODE_TIMEOUT_MS
       );
 
-    const avgCpu = activeNodes.length
-      ? activeNodes.reduce((sum, n) => sum + clamp(n.cpu), 0) / activeNodes.length
+    const avgCpu = active.length
+      ? active.reduce((sum, node) => sum + clamp(node.cpu), 0) / active.length
       : 0;
 
-    const avgRam = activeNodes.length
-      ? activeNodes.reduce((sum, n) => sum + clamp(n.ram), 0) / activeNodes.length
+    const avgRam = active.length
+      ? active.reduce((sum, node) => sum + clamp(node.ram), 0) / active.length
       : 0;
 
-    const critical = activeNodes.filter(
-      (n) => clamp(n.cpu) >= 85 || clamp(n.ram) >= 90 || clamp(n.anomaly) >= 75
+    const critical = active.filter(
+      (node) =>
+        clamp(node.cpu) >= 85 ||
+        clamp(node.ram) >= 90 ||
+        clamp(node.anomaly) >= 75
     ).length;
 
-    const totalThroughput = activeNodes.reduce(
-      (sum, n) => sum + (Number(n.throughput) || 0),
+    const throughput = active.reduce(
+      (sum, node) => sum + (Number(node.throughput) || 0),
       0
     );
 
@@ -1145,12 +1337,16 @@ export default function App() {
       avgRam,
       critical,
       websiteDownCount,
-      throughput: totalThroughput || 12000,
-      fleetHealth: activeNodes.length
+      throughput: throughput || 12000,
+      fleetHealth: active.length
         ? Math.max(0, 100 - critical * 20 - avgCpu * 0.1)
         : 100,
     };
   }, [devices, websites, nowMs]);
+
+  if (!authToken) {
+    return <AuthScreen onAuthenticated={handleAuthenticated} />;
+  }
 
   if (!hasCompletedOnboarding) {
     return (
@@ -1173,9 +1369,9 @@ export default function App() {
                 Telemetry Center
               </span>
             </h1>
-
             <p className="text-[11px] text-slate-500">
-              Website uptime, API health, and infrastructure telemetry
+              {currentOrganization?.name || "Workspace"} ·{" "}
+              {currentUser?.email || "Authenticated user"}
             </p>
           </div>
 
@@ -1185,6 +1381,14 @@ export default function App() {
               className="rounded-full border border-slate-800 bg-slate-900/40 px-3.5 py-1.5 font-mono text-[10px] text-slate-400 hover:text-cyan-300"
             >
               ONBOARDING
+            </button>
+
+            <button
+              onClick={logout}
+              className="flex items-center gap-2 rounded-full border border-rose-500/20 bg-rose-500/10 px-3.5 py-1.5 font-mono text-[10px] text-rose-300 hover:bg-rose-500/20"
+            >
+              <LogOut className="h-3 w-3" />
+              LOGOUT
             </button>
 
             <span className="rounded-full border border-slate-800 bg-slate-900/40 px-3.5 py-1.5 font-mono text-[10px] text-cyan-400">
@@ -1250,6 +1454,7 @@ export default function App() {
 
         <WebsiteMonitorPanel
           gatewayBaseUrl={GATEWAY_API_BASE}
+          apiFetch={apiFetch}
           websites={websites}
           setWebsites={setWebsites}
           refreshWebsites={refreshWebsites}
@@ -1257,6 +1462,7 @@ export default function App() {
 
         <RegisteredDevicesPanel
           gatewayBaseUrl={GATEWAY_API_BASE}
+          apiFetch={apiFetch}
           devices={registeredDevices}
           refreshDevices={refreshRegisteredDevices}
           onDeleteDevice={handleDeleteRegisteredDevice}
@@ -1313,13 +1519,15 @@ export default function App() {
                     margin={{ left: -20, right: 10, top: 10, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#131b2e" />
-                    <XAxis dataKey="time" tick={{ fill: "#475569", fontSize: 10 }} />
+                    <XAxis
+                      dataKey="time"
+                      tick={{ fill: "#475569", fontSize: 10 }}
+                    />
                     <YAxis
                       tick={{ fill: "#475569", fontSize: 10 }}
                       domain={[0, 100]}
                     />
                     <Tooltip />
-
                     <Area
                       type="monotone"
                       dataKey="cpu"
@@ -1328,7 +1536,6 @@ export default function App() {
                       fill="#22d3ee"
                       fillOpacity={0.05}
                     />
-
                     <Area
                       type="monotone"
                       dataKey="ram"
@@ -1337,7 +1544,6 @@ export default function App() {
                       fill="#818cf8"
                       fillOpacity={0.04}
                     />
-
                     <Area
                       type="monotone"
                       dataKey="anomaly"
@@ -1374,7 +1580,6 @@ export default function App() {
                         <span>{severityFromAlert(alert)}</span>
                         <span>{formatTime(new Date(alert.timestamp))}</span>
                       </div>
-
                       <p className="text-slate-300">
                         Node{" "}
                         <span className="font-bold text-white">

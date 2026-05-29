@@ -15,7 +15,6 @@ class Organization(Base):
 
     organization_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-
     plan: Mapped[str] = mapped_column(String(50), default="free")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -33,7 +32,6 @@ class User(Base):
 
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
     password_hash: Mapped[str] = mapped_column(Text)
 
     role: Mapped[str] = mapped_column(String(50), default="owner")

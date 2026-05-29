@@ -108,6 +108,7 @@ async def update_website_result(result):
 
 async def check_website(client, website):
     started = time.perf_counter()
+    expected_status = int(website.get("expected_status", 200))
 
     try:
         response = await client.get(
@@ -117,7 +118,6 @@ async def check_website(client, website):
         )
 
         latency_ms = round((time.perf_counter() - started) * 1000, 2)
-        expected_status = int(website.get("expected_status", 200))
         is_up = response.status_code == expected_status
 
         return {
@@ -137,7 +137,6 @@ async def check_website(client, website):
 
     except Exception as e:
         latency_ms = round((time.perf_counter() - started) * 1000, 2)
-        expected_status = int(website.get("expected_status", 200))
 
         return {
             "packet_type": "WEBSITE",
