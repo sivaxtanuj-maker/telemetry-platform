@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from aiokafka import AIOKafkaProducer
+from kafka_client import KAFKA_BOOTSTRAP_SERVERS, get_kafka_producer
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -20,7 +20,7 @@ from database import check_database_connection, get_db, init_database
 from db_models import Device, EnrollmentToken, Organization, User, WebsiteMonitor
 
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_BOOTSTRAP = KAFKA_BOOTSTRAP_SERVERS
 TELEMETRY_TOPIC = "telemetry-stream"
 DEV_API_KEY = "dev-api-key"
 
@@ -262,7 +262,7 @@ async def lifespan(app: FastAPI):
     print("Postgres tables ready.")
 
     try:
-        producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+        producer = get_kafka_producer()
         await producer.start()
         print(f"Kafka producer connected at {KAFKA_BOOTSTRAP}")
     except Exception as e:
