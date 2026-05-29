@@ -10,7 +10,7 @@ KAFKA_USERNAME = os.getenv("KAFKA_USERNAME")
 KAFKA_PASSWORD = os.getenv("KAFKA_PASSWORD")
 
 
-def get_kafka_producer():
+def kafka_auth_config():
     config = {
         "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
     }
@@ -27,4 +27,8 @@ def get_kafka_producer():
     if KAFKA_PASSWORD:
         config["sasl_plain_password"] = KAFKA_PASSWORD
 
-    return AIOKafkaProducer(**config)
+    return config
+
+
+def get_kafka_producer():
+    return AIOKafkaProducer(**kafka_auth_config())

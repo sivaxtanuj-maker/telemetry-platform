@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from kafka_client import KAFKA_BOOTSTRAP_SERVERS, get_kafka_producer
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -15,16 +14,21 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth_utils import create_access_token, decode_access_token, hash_password, verify_password
+from auth_utils import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 from database import check_database_connection, get_db, init_database
 from db_models import Device, EnrollmentToken, Organization, User, WebsiteMonitor
+from kafka_client import KAFKA_BOOTSTRAP_SERVERS, get_kafka_producer
 
 
-KAFKA_BOOTSTRAP = KAFKA_BOOTSTRAP_SERVERS
 TELEMETRY_TOPIC = "telemetry-stream"
 DEV_API_KEY = "dev-api-key"
 
-producer: Optional[AIOKafkaProducer] = None
+producer = None
 bearer_scheme = HTTPBearer(auto_error=True)
 
 
@@ -32,41 +36,42 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+def normalize_datetime(value):
+    if value is None:
+        return None
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value
+
+
 def sanitize_device_id(name: str):
     cleaned = "".join(
         ch if ch.isalnum() or ch in ["-", "_"] else "-"
         for ch in name.strip()
     )
+
     cleaned = "-".join(part for part in cleaned.split("-") if part)
+
     return cleaned or f"Device-{uuid.uuid4().hex[:8]}"
 
 
-async def make_unique_device_id(requested_name: str, db: AsyncSession, organization_id: str):
+async def make_unique_device_id(requested_name: str, db: AsyncSession):
     base = sanitize_device_id(requested_name)
 
-    result = await db.execute(
-        select(Device).where(
-            Device.organization_id == organization_id,
-            Device.device_id == base,
-        )
-    )
+    existing = await db.get(Device, base)
 
-    if not result.scalar_one_or_none():
+    if not existing:
         return base
 
     counter = 2
 
     while True:
         candidate = f"{base}-{counter}"
+        existing = await db.get(Device, candidate)
 
-        result = await db.execute(
-            select(Device).where(
-                Device.organization_id == organization_id,
-                Device.device_id == candidate,
-            )
-        )
-
-        if not result.scalar_one_or_none():
+        if not existing:
             return candidate
 
         counter += 1
@@ -90,7 +95,10 @@ def get_bearer_token(authorization: Optional[str]):
 
 
 async def find_device_by_api_key(api_key: str, db: AsyncSession):
-    result = await db.execute(select(Device).where(Device.api_key == api_key))
+    result = await db.execute(
+        select(Device).where(Device.api_key == api_key)
+    )
+
     return result.scalar_one_or_none()
 
 
@@ -168,11 +176,16 @@ def serialize_user(user: User):
         "full_name": user.full_name,
         "role": user.role,
         "created_at": user.created_at.isoformat() if user.created_at else None,
-        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+        "last_login_at": user.last_login_at.isoformat()
+        if user.last_login_at
+        else None,
     }
 
 
 def serialize_organization(org: Organization):
+    if not org:
+        return None
+
     return {
         "organization_id": org.organization_id,
         "name": org.name,
@@ -257,6 +270,7 @@ async def lifespan(app: FastAPI):
     global producer
 
     print("Starting gateway...")
+
     print("Initializing Postgres database...")
     await init_database()
     print("Postgres tables ready.")
@@ -264,7 +278,7 @@ async def lifespan(app: FastAPI):
     try:
         producer = get_kafka_producer()
         await producer.start()
-        print(f"Kafka producer connected at {KAFKA_BOOTSTRAP}")
+        print(f"Kafka producer connected at {KAFKA_BOOTSTRAP_SERVERS}")
     except Exception as e:
         producer = None
         print(f"Kafka unavailable. Reason: {e}")
@@ -278,13 +292,33 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+allowed_origins_raw = os.getenv("CORS_ALLOW_ORIGINS", "*")
+
+if allowed_origins_raw == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [
+        origin.strip()
+        for origin in allowed_origins_raw.split(",")
+        if origin.strip()
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+async def root():
+    return {
+        "service": "aether-gateway",
+        "status": "online",
+        "health_url": "/health",
+    }
 
 
 @app.get("/health")
@@ -302,7 +336,7 @@ async def health(db: AsyncSession = Depends(get_db)):
         "service": "aether-gateway",
         "kafka_enabled": producer is not None,
         "database_connected": db_connected,
-        "kafka_bootstrap": KAFKA_BOOTSTRAP,
+        "kafka_bootstrap": KAFKA_BOOTSTRAP_SERVERS,
         "device_count": len(devices),
         "website_monitor_count": len(websites),
         "ingest_endpoint": "/api/v1/telemetry",
@@ -313,7 +347,9 @@ async def health(db: AsyncSession = Depends(get_db)):
 async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
     email = payload.email.lower().strip()
 
-    existing_result = await db.execute(select(User).where(User.email == email))
+    existing_result = await db.execute(
+        select(User).where(User.email == email)
+    )
     existing_user = existing_result.scalar_one_or_none()
 
     if existing_user:
@@ -337,6 +373,7 @@ async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
 
     db.add(organization)
     db.add(user)
+
     await db.commit()
     await db.refresh(organization)
     await db.refresh(user)
@@ -362,13 +399,16 @@ async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     email = payload.email.lower().strip()
 
-    result = await db.execute(select(User).where(User.email == email))
+    result = await db.execute(
+        select(User).where(User.email == email)
+    )
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     user.last_login_at = utc_now()
+
     await db.commit()
     await db.refresh(user)
 
@@ -417,13 +457,15 @@ async def create_website_monitor(
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
+    interval = max(5, int(payload.check_interval_seconds or 10))
+
     site = WebsiteMonitor(
         website_id=website_id,
         organization_id=workspace["organization_id"],
-        name=payload.name,
+        name=payload.name.strip() or "Unnamed Monitor",
         url=url,
-        expected_status=payload.expected_status,
-        check_interval_seconds=payload.check_interval_seconds,
+        expected_status=int(payload.expected_status or 200),
+        check_interval_seconds=interval,
         status="unknown",
         last_checked=None,
         last_status_code=None,
@@ -489,14 +531,22 @@ async def create_enrollment_token(
     workspace: dict = Depends(get_current_workspace),
 ):
     token = "enroll_" + secrets.token_urlsafe(24)
+
     now = utc_now()
-    expires_at = now + timedelta(minutes=payload.expires_in_minutes)
+    expires_at = now + timedelta(minutes=int(payload.expires_in_minutes or 60))
+
+    organization = await db.get(Organization, workspace["organization_id"])
+    organization_name = (
+        organization.name
+        if organization
+        else payload.organization_name or "Local Development Tenant"
+    )
 
     token_record = EnrollmentToken(
         token=token,
         organization_id=workspace["organization_id"],
-        organization_name=payload.organization_name,
-        requested_device_name=payload.device_name,
+        organization_name=organization_name,
+        requested_device_name=payload.device_name.strip() or "New-Device-Node",
         created_at=now,
         expires_at=expires_at,
         used=False,
@@ -533,17 +583,13 @@ async def register_device(
     if token_record.used:
         raise HTTPException(status_code=401, detail="Enrollment token already used")
 
-    if utc_now() > token_record.expires_at:
+    expires_at = normalize_datetime(token_record.expires_at)
+
+    if utc_now() > expires_at:
         raise HTTPException(status_code=401, detail="Enrollment token expired")
 
     requested_name = token_record.requested_device_name or payload.hostname
-
-    device_id = await make_unique_device_id(
-        requested_name=requested_name,
-        db=db,
-        organization_id=token_record.organization_id,
-    )
-
+    device_id = await make_unique_device_id(requested_name, db)
     api_key = "device_" + secrets.token_urlsafe(32)
 
     device = Device(
@@ -676,7 +722,10 @@ async def receive_telemetry(
                 device_id=device_id,
                 organization_id=org_id,
                 display_name=device_id,
-                organization_name=data.get("organization_name", "Local Development Tenant"),
+                organization_name=data.get(
+                    "organization_name",
+                    "Local Development Tenant",
+                ),
                 hostname=device_id,
                 platform="dev",
                 agent_version="dev",

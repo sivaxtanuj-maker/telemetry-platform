@@ -42,4 +42,3 @@ def get_kafka_consumer(topic_name: str, group_id: str):
         enable_auto_commit=True,
         **kafka_auth_config(),
     )
-    

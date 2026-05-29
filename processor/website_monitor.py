@@ -6,13 +6,18 @@ from datetime import datetime, timezone
 
 import asyncpg
 import httpx
-from aiokafka import AIOKafkaProducer
+
+from kafka_client import KAFKA_BOOTSTRAP_SERVERS, get_kafka_producer
 
 
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-DATABASE_URL = os.getenv(
+RAW_DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://aether:aether_password@localhost:5432/aether_db",
+)
+
+DATABASE_URL = RAW_DATABASE_URL.replace(
+    "postgresql+asyncpg://",
+    "postgresql://",
 )
 
 WEBSITE_TOPIC = "website-monitor-stream"
@@ -168,8 +173,9 @@ async def monitor_loop():
     print("Starting AETHER Website Monitor worker...")
     print(f"Reading monitors from Postgres: {DATABASE_URL}")
     print(f"Publishing results to Kafka topic: {WEBSITE_TOPIC}")
+    print(f"Kafka bootstrap servers: {KAFKA_BOOTSTRAP_SERVERS}")
 
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+    producer = get_kafka_producer()
     await producer.start()
 
     db_pool = await asyncpg.create_pool(DATABASE_URL)
@@ -190,6 +196,8 @@ async def monitor_loop():
                 for website in websites:
                     website_id = website["website_id"]
                     interval = int(website.get("check_interval_seconds", 10))
+                    interval = max(5, interval)
+
                     last_checked = last_checked_by_site.get(website_id, 0)
 
                     if now - last_checked < interval:
@@ -206,13 +214,15 @@ async def monitor_loop():
                         f"{result['name']} -> "
                         f"{result['status'].upper()} | "
                         f"status={result['status_code']} | "
-                        f"latency={result['latency_ms']}ms"
+                        f"latency={result['latency_ms']}ms | "
+                        f"org={result['organization_id']}"
                     )
 
                 await asyncio.sleep(1)
 
     finally:
-        await producer.stop()
+        if producer:
+            await producer.stop()
 
         if db_pool:
             await db_pool.close()
