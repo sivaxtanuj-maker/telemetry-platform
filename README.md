@@ -7,16 +7,7 @@ AETHER Cloud is a full-stack cloud observability platform inspired by tools like
 The platform was built as a production-style SaaS system using a React frontend, FastAPI backend, PostgreSQL persistence, Kafka event streaming, WebSocket live updates, and cloud deployment across Netlify, Render, and Aiven.
 
 ---
-
-## Live Demo
-
-**Frontend:** `ADD_NETLIFY_URL_HERE`
-**API Health:** `https://aether-gateway-0zag.onrender.com/health`
-**Streamer Health:** `https://aether-streamer.onrender.com/health`
-**GitHub:** `ADD_REPOSITORY_URL_HERE`
-
 > Note: This demo runs on free-tier infrastructure. The first request may take 30–60 seconds while Render services wake up.
-
 ---
 
 ## Project Highlights
