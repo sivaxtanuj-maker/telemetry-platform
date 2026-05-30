@@ -1,266 +1,507 @@
-# AETHER Telemetry Platform
+# AETHER Cloud
 
-AETHER is a real-time infrastructure telemetry and anomaly detection platform. It simulates how enterprise observability tools monitor distributed machines, stream system metrics through a data pipeline, and display live node health inside a web dashboard.
+**Real-time observability SaaS platform for website/API monitoring and infrastructure telemetry.**
 
-The system collects CPU, memory, disk, network, and anomaly-score metrics from multiple devices, sends them through a FastAPI ingestion gateway, publishes events into Kafka, streams live updates over WebSockets, and visualizes everything in a React dashboard.
+AETHER Cloud is a full-stack cloud observability platform inspired by tools like Datadog, New Relic, and Grafana Cloud. It allows users to create a workspace, monitor websites and APIs, enroll machines with a lightweight telemetry agent, and view live infrastructure health through a real-time dashboard.
 
-## Project Status
+The platform was built as a production-style SaaS system using a React frontend, FastAPI backend, PostgreSQL persistence, Kafka event streaming, WebSocket live updates, and cloud deployment across Netlify, Render, and Aiven.
 
-This project currently supports:
+---
 
-* Windows telemetry agent
-* Linux/Ubuntu telemetry agent
-* FastAPI ingestion gateway
-* Kafka event streaming
-* WebSocket live streamer
-* React dashboard
-* Live device status tracking
-* CPU, memory, disk, network, and anomaly metrics
-* Cross-platform launcher scripts
+## Live Demo
 
-## Architecture
+**Frontend:** `ADD_NETLIFY_URL_HERE`
+**API Health:** `https://aether-gateway-0zag.onrender.com/health`
+**Streamer Health:** `https://aether-streamer.onrender.com/health`
+**GitHub:** `ADD_REPOSITORY_URL_HERE`
 
-```txt
-Windows Agent
-Linux Agent
-     |
-     v
-FastAPI Gateway
-     |
-     v
-Kafka telemetry-stream / alerts-stream
-     |
-     v
-Processor + WebSocket Streamer
-     |
-     v
-React Dashboard
-```
+> Note: This demo runs on free-tier infrastructure. The first request may take 30–60 seconds while Render services wake up.
+
+---
+
+## Project Highlights
+
+* Built a full-stack observability SaaS platform with authentication, monitoring, telemetry ingestion, and real-time dashboard updates.
+* Designed a multi-service cloud architecture using React, FastAPI, PostgreSQL, Kafka, and WebSockets.
+* Implemented JWT-based authentication with workspace-level data isolation.
+* Built website/API uptime monitoring with latency tracking and live status updates.
+* Built a machine enrollment flow for infrastructure telemetry using secure device API keys.
+* Streamed website and device events through Kafka topics and broadcasted updates to the frontend using WebSockets.
+* Deployed frontend, backend, database, and streaming infrastructure across Netlify, Render, and Aiven.
+* Debugged production deployment issues involving Python versions, dependency resolution, Render environment variables, Kafka SSL certificates, and cloud service configuration.
+
+---
 
 ## Tech Stack
-
-### Backend
-
-* Python
-* FastAPI
-* Uvicorn
-* Kafka
-* aiokafka
-* httpx
-* psutil
-* WebSockets
 
 ### Frontend
 
 * React
 * Vite
+* JavaScript
 * Recharts
 * Lucide React
-* CSS
+* Browser localStorage
+* Netlify deployment
 
-### Infrastructure
+### Backend
 
-* Docker
-* Docker Compose
-* Git/GitHub
-* Windows PowerShell
-* Ubuntu/WSL
+* Python
+* FastAPI
+* SQLAlchemy async ORM
+* JWT authentication
+* Password hashing
+* Async PostgreSQL connection
+* Render deployment
 
-## Main Features
+### Database
 
-### Real-Time Telemetry Agents
+* PostgreSQL
+* Render Postgres
 
-The agents collect live machine metrics such as:
+### Streaming and Real-Time Infrastructure
+
+* Apache Kafka
+* Aiven Kafka
+* Kafka event topics
+* WebSockets
+* `aiohttp`
+* `aiokafka`
+
+### Infrastructure / Deployment
+
+* Netlify for frontend hosting
+* Render Web Services for backend services
+* Render Postgres for relational storage
+* Aiven Kafka for managed event streaming
+* Environment variables and secret files for production configuration
+
+---
+
+## System Architecture
+
+```txt
+User Browser
+  |
+  | HTTPS
+  v
+Netlify React Frontend
+  |
+  | REST API calls
+  v
+Render FastAPI Gateway
+  |
+  | SQL queries
+  v
+Render PostgreSQL Database
+
+Render FastAPI Gateway
+  |
+  | Kafka events
+  v
+Aiven Kafka
+  |
+  | Kafka consumers
+  v
+Render Streamer Service
+  |
+  | WebSocket messages
+  v
+Live React Dashboard
+```
+
+The deployed system is split into several services:
+
+```txt
+Netlify
+  React frontend
+
+Render
+  aether-gateway
+    FastAPI backend API
+
+Render
+  aether-streamer
+    WebSocket server
+    Kafka consumer
+    Embedded website monitor loop
+
+Render
+  aether-postgres
+    PostgreSQL database
+
+Aiven
+  Apache Kafka
+    telemetry-stream
+    alerts-stream
+    website-monitor-stream
+
+User Machine
+  Optional Python telemetry agent
+```
+
+---
+
+## Core Features
+
+### User Authentication
+
+AETHER includes a complete authentication flow:
+
+* User signup
+* User login
+* JWT access tokens
+* Password hashing
+* Protected API routes
+* Workspace-based data isolation
+
+Each user belongs to an organization/workspace. Website monitors and devices are tied to that organization, which prevents one user from seeing another user’s data.
+
+---
+
+### Website and API Monitoring
+
+Users can add websites or APIs to monitor.
+
+For each monitor, the system tracks:
+
+* URL
+* Expected HTTP status code
+* Current status
+* Last checked time
+* Last response code
+* Latency in milliseconds
+* Error messages if the check fails
+
+Supported monitor states:
+
+```txt
+unknown   monitor has been created but not checked yet
+up        endpoint returned the expected status code
+degraded  endpoint responded but did not match expected status
+down      request failed or timed out
+```
+
+---
+
+### Machine Telemetry
+
+AETHER supports machine enrollment through an agent-based telemetry model.
+
+The device flow:
+
+```txt
+1. User generates an enrollment token.
+2. Agent registers with the backend.
+3. Backend creates a device API key.
+4. Agent sends telemetry to the gateway.
+5. Gateway validates the device key.
+6. Metrics are stored and streamed to the dashboard.
+```
+
+Telemetry can include:
 
 * CPU usage
 * Memory usage
-* Disk usage
-* Network bytes sent/received
-* Network packets sent/received
+* Device status
+* Hostname
+* Platform
+* Agent version
 * Anomaly score
-* Device identity
-* Operating system information
 
-### FastAPI Gateway
+---
 
-The gateway receives telemetry over HTTP and publishes the data into Kafka.
+### Kafka Event Streaming
 
-Endpoint:
+Kafka is used as the live event backbone of the system.
+
+Kafka topics:
+
+```txt
+telemetry-stream
+  Machine telemetry events such as CPU, memory, and anomaly metrics.
+
+website-monitor-stream
+  Website/API uptime check results.
+
+alerts-stream
+  Reserved for alert and SLA breach events.
+```
+
+Kafka allows the system to separate event producers from event consumers. The backend can publish telemetry or website status events without directly depending on connected frontend clients.
+
+---
+
+### WebSocket Live Dashboard
+
+The dashboard receives real-time updates through WebSockets.
+
+Instead of forcing the frontend to refresh repeatedly, the streamer service keeps a live WebSocket connection open and pushes new Kafka events directly to the browser.
+
+This enables live updates for:
+
+* Website status
+* Website latency
+* Device telemetry
+* Alert feed data
+* System health indicators
+
+---
+
+## Important API Endpoints
+
+### Health
+
+```txt
+GET /health
+```
+
+Checks whether the API service is online and connected to Postgres/Kafka.
+
+### Authentication
+
+```txt
+POST /api/v1/auth/signup
+POST /api/v1/auth/login
+GET  /api/v1/me
+```
+
+### Website Monitors
+
+```txt
+POST   /api/v1/websites
+GET    /api/v1/websites
+DELETE /api/v1/websites/{website_id}
+```
+
+### Devices
+
+```txt
+POST   /api/v1/devices/enrollment-token
+POST   /api/v1/devices/register
+GET    /api/v1/devices
+DELETE /api/v1/devices/{device_id}
+```
+
+### Telemetry
 
 ```txt
 POST /api/v1/telemetry
 ```
 
-### Kafka Streaming Layer
+Accepts telemetry from enrolled devices and publishes events into Kafka.
 
-Kafka is used as the event backbone of the system.
+---
 
-Topics:
+## Data Flow Examples
 
-```txt
-telemetry-stream
-alerts-stream
-```
-
-### WebSocket Streamer
-
-The streamer consumes Kafka messages and pushes live updates to the React dashboard through WebSockets.
-
-Default WebSocket URL:
+### Signup Flow
 
 ```txt
-ws://localhost:8765
+User submits signup form
+↓
+React sends request to FastAPI gateway
+↓
+Gateway validates input
+↓
+Gateway hashes password
+↓
+Gateway creates user and organization in Postgres
+↓
+Gateway returns JWT access token
+↓
+Frontend stores token and enters dashboard
 ```
 
-### React Dashboard
-
-The dashboard displays:
-
-* Global fleet health
-* Average cluster CPU
-* Cluster memory usage
-* Ingest throughput
-* Active SLA alerts
-* Active infrastructure nodes
-* Real-time waveform charts
-* Node connection status
-
-## Local Development Setup
-
-### 1. Start Kafka
-
-```powershell
-cd C:\Users\Tanuj\telemetry-platform
-docker compose up
-```
-
-### 2. Start the FastAPI Gateway
-
-Open a new PowerShell terminal:
-
-```powershell
-cd C:\Users\Tanuj\telemetry-platform\gateway
-..\.venv\Scripts\Activate.ps1
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 3. Start the WebSocket Streamer
-
-Open another PowerShell terminal:
-
-```powershell
-cd C:\Users\Tanuj\telemetry-platform\processor
-..\.venv\Scripts\Activate.ps1
-python streamer.py
-```
-
-### 4. Start the Frontend
-
-Open another PowerShell terminal:
-
-```powershell
-cd C:\Users\Tanuj\telemetry-platform\frontend
-npm run dev
-```
-
-Then open the Vite URL shown in the terminal.
-
-Usually:
+### Website Monitoring Flow
 
 ```txt
-http://localhost:5173
+User adds website monitor
+↓
+Gateway stores monitor in Postgres
+↓
+Streamer reads monitors from Postgres
+↓
+Streamer checks website status and latency
+↓
+Streamer updates Postgres with latest result
+↓
+Streamer publishes result to Kafka
+↓
+Streamer broadcasts result over WebSocket
+↓
+React dashboard updates live
 ```
 
-or:
+### Machine Telemetry Flow
 
 ```txt
-http://localhost:5174
+Agent registers with enrollment token
+↓
+Gateway creates device and API key
+↓
+Agent sends telemetry to gateway
+↓
+Gateway validates device API key
+↓
+Gateway updates latest device metrics in Postgres
+↓
+Gateway publishes telemetry event to Kafka
+↓
+Streamer consumes event
+↓
+Dashboard updates live through WebSocket
 ```
 
-### 5. Start the Windows Agent
+---
 
-```powershell
-cd C:\Users\Tanuj\telemetry-platform\agent
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-.\run_windows_agent.ps1
+## Production Deployment
+
+The project is deployed using free-tier cloud services:
+
+| Layer              | Service            |
+| ------------------ | ------------------ |
+| Frontend           | Netlify            |
+| Backend API        | Render Web Service |
+| Real-time Streamer | Render Web Service |
+| Database           | Render Postgres    |
+| Kafka              | Aiven Kafka        |
+
+The frontend uses public environment variables:
+
+```env
+VITE_GATEWAY_API_BASE=https://aether-gateway-0zag.onrender.com
+VITE_WS_URL=wss://aether-streamer.onrender.com/ws
+VITE_STREAMER_HEALTH_URL=https://aether-streamer.onrender.com/health
 ```
 
-### 6. Start the Linux Agent from WSL
+Backend secrets are stored only in Render environment variables and secret files.
 
-```bash
-cd /mnt/c/Users/Tanuj/telemetry-platform/agent
-./run_linux_agent.sh
+Sensitive values such as database URLs, JWT secrets, Kafka credentials, and certificates are not committed to GitHub.
+
+---
+
+## Deployment Challenges Solved
+
+During deployment, several production-style issues were debugged and fixed:
+
+### Render Python Version Issue
+
+Render initially used a newer Python version that caused dependency build failures. This was fixed by setting:
+
+```env
+PYTHON_VERSION=3.11.10
 ```
 
-## Agent Configuration
+### Missing Backend Dependencies
 
-The agent supports a local config file:
+The backend initially deployed with an incomplete `requirements.txt`. Missing packages such as `aiokafka`, `sqlalchemy`, `asyncpg`, `bcrypt`, and `PyJWT` were added.
 
-```txt
-agent/agent_config.json
+### Wrong Git Branch / Old Commit Deployment
+
+Render was deploying an older Git commit from `main`. The feature branch was pushed into `main` so Render could deploy the latest production-ready code.
+
+### Kafka SSL Certificate Verification
+
+Aiven Kafka required SSL certificate verification using its CA certificate. The certificate was added as a Render Secret File and loaded through:
+
+```env
+KAFKA_CA_CERT_PATH=/etc/secrets/aiven-ca.pem
 ```
 
-Example:
+### Frontend Environment Variable Misconfiguration
 
-```json
-{
-  "gateway_url": "http://localhost:8000/api/v1/telemetry",
-  "device_id": "Windows-Workstation-Node01",
-  "organization_name": "Local Development Tenant",
-  "api_key": "dev-api-key",
-  "tick_rate": 2.0
-}
+The frontend accidentally received a Postgres database URL instead of the FastAPI gateway URL. This caused browser fetch requests to fail. The issue was fixed by setting:
+
+```env
+VITE_GATEWAY_API_BASE=https://aether-gateway-0zag.onrender.com
 ```
 
-A safe example file is included:
+This reinforced the rule that frontend environment variables must only contain public URLs, never private secrets.
 
-```txt
-agent/agent_config.example.json
-```
+---
 
-The real config file is ignored by Git.
+## Security Considerations
 
-## Example Data Flow
+The project includes several security practices:
 
-```txt
-1. Agent collects system metrics.
-2. Agent sends telemetry to FastAPI.
-3. FastAPI publishes telemetry to Kafka.
-4. Streamer consumes Kafka messages.
-5. Streamer pushes updates to dashboard over WebSocket.
-6. Dashboard updates live charts and node cards.
-```
+* Passwords are hashed before being stored.
+* Users authenticate using JWT access tokens.
+* Protected routes require bearer tokens.
+* Users are isolated by organization/workspace.
+* Device agents use API keys after enrollment.
+* Backend secrets are stored in Render environment variables.
+* Kafka CA certificates are stored as Render Secret Files.
+* Database URLs and private credentials are not intended to be exposed to the frontend.
+
+---
+
+## Free-Tier Notes
+
+This project is currently configured as a portfolio demo using free-tier cloud infrastructure.
+
+Known limitations:
+
+* Render services may sleep after inactivity.
+* First request after sleep may take 30–60 seconds.
+* Free Postgres databases may expire or reset depending on provider limits.
+* Kafka usage should remain low.
+* Local telemetry agents should only be run during demos.
+
+For a production version, the database and background workers should be moved to persistent paid infrastructure.
+
+---
+
+## What I Learned
+
+This project helped me learn and practice:
+
+* Full-stack SaaS architecture
+* React frontend development
+* FastAPI backend development
+* JWT authentication
+* Password hashing
+* PostgreSQL schema design
+* Multi-tenant data isolation
+* Kafka event streaming
+* WebSocket real-time communication
+* Cloud deployment with Netlify, Render, and Aiven
+* Environment variable configuration
+* Secret file management
+* Debugging production logs
+* Designing agent-based telemetry pipelines
+
+---
 
 ## Future Improvements
 
-Planned upgrades:
+Planned improvements include:
 
-* Device enrollment tokens
-* Add Device button in dashboard
-* User authentication
-* Organization/tenant accounts
-* Persistent database storage
-* Historical metrics view
-* Alert rules engine
-* Email/SMS/Discord alert delivery
-* Dockerized backend services
-* Production deployment
-* TLS-secured WebSocket support
-* API key validation
-* Mobile companion app or QR-based device pairing
+* Email or Slack downtime alerts
+* Incident history pages
+* More detailed uptime charts
+* Team invitations
+* Role-based access control
+* Billing and subscription plans
+* More advanced anomaly detection
+* Dockerized deployment
+* Dedicated background workers
+* Custom domain
+* Demo video and screenshots
 
-## Why This Project Matters
+---
 
-This project demonstrates skills in:
+## Project Status
 
-* Distributed systems
-* Real-time data pipelines
-* Backend API development
+AETHER Cloud is currently a live portfolio demo.
+
+The platform supports:
+
+* User accounts
+* Workspace creation
+* Website/API monitoring
 * Kafka event streaming
-* WebSocket communication
-* Systems monitoring
-* Frontend dashboard design
-* Cross-platform agent development
-* Docker-based local infrastructure
-
-It is designed to resemble the foundations of an enterprise observability platform like Datadog, New Relic, or Grafana Cloud.
+* WebSocket live dashboard updates
+* Device enrollment
+* Machine telemetry ingestion
+* Cloud deployment
